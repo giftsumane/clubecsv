@@ -7,6 +7,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -38,8 +39,16 @@ export default function LibraryContentDetailScreen() {
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const isLoading = usePlayerStore((state) => state.isLoading);
   const isBuffering = usePlayerStore((state) => state.isBuffering);
+  const isDownloading = usePlayerStore((state) => state.isDownloading);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const preloadQueue = usePlayerStore((state) => state.preloadQueue);
+  const downloadTrackOffline = usePlayerStore(
+    (state) => state.downloadTrackOffline
+  );
+  const hydrateOfflineState = usePlayerStore(
+    (state) => state.hydrateOfflineState
+  );
+  const isTrackOffline = usePlayerStore((state) => state.isTrackOffline);
 
   useEffect(() => {
     let mounted = true;
@@ -81,7 +90,9 @@ export default function LibraryContentDetailScreen() {
         artistName: content.artist?.name ?? null,
       },
     ]).catch(() => {});
-  }, [content, preloadQueue]);
+
+    hydrateOfflineState([content.id]).catch(() => {});
+  }, [content, preloadQueue, hydrateOfflineState]);
 
   const handlePlay = async () => {
     if (!content) return;
@@ -103,6 +114,27 @@ export default function LibraryContentDetailScreen() {
     };
 
     await setQueueAndPlay([track], track);
+  };
+
+  const handleDownload = async () => {
+    if (!content) return;
+
+    try {
+      const track: Track = {
+        id: content.id,
+        contentId: content.id,
+        title: content.title,
+        url: null,
+        cover_url: content.cover_url ?? null,
+        artistName: content.artist?.name ?? null,
+      };
+
+      await downloadTrackOffline(track);
+      Alert.alert("Offline", "Conteúdo descarregado com sucesso.");
+    } catch (error) {
+      console.log("Erro ao descarregar conteúdo:", error);
+      Alert.alert("Erro", "Não foi possível descarregar o conteúdo.");
+    }
   };
 
   if (loading) {
@@ -133,6 +165,7 @@ export default function LibraryContentDetailScreen() {
   }
 
   const isCurrent = currentTrack?.id === content.id;
+  const offline = isTrackOffline(content.id);
 
   return (
     <AppGradient>
@@ -173,6 +206,28 @@ export default function LibraryContentDetailScreen() {
                 ? "Pausar"
                 : "Continuar"
               : "Ouvir"}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={[
+            styles.downloadButton,
+            (isDownloading || offline) && styles.downloadButtonDisabled,
+          ]}
+          onPress={handleDownload}
+          disabled={isDownloading || offline}
+        >
+          <Ionicons
+            name={offline ? "checkmark-circle" : "download-outline"}
+            size={20}
+            color={colors.white}
+          />
+          <Text style={styles.downloadButtonText}>
+            {isDownloading
+              ? "A descarregar..."
+              : offline
+              ? "Disponível offline"
+              : "Descarregar para offline"}
           </Text>
         </Pressable>
 
@@ -272,6 +327,24 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: "800",
     fontSize: 16,
+  },
+  downloadButton: {
+    marginTop: 12,
+    backgroundColor: colors.secondary,
+    paddingVertical: 15,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  downloadButtonDisabled: {
+    opacity: 0.75,
+  },
+  downloadButtonText: {
+    color: colors.white,
+    fontWeight: "800",
+    fontSize: 15,
   },
   statusCard: {
     marginTop: 18,

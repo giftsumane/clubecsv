@@ -10,6 +10,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -29,7 +30,15 @@ export default function AlbumDetailScreen() {
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const isLoading = usePlayerStore((state) => state.isLoading);
   const isBuffering = usePlayerStore((state) => state.isBuffering);
+  const isDownloading = usePlayerStore((state) => state.isDownloading);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
+  const downloadAlbumOffline = usePlayerStore(
+    (state) => state.downloadAlbumOffline
+  );
+  const hydrateOfflineState = usePlayerStore(
+    (state) => state.hydrateOfflineState
+  );
+  const isTrackOffline = usePlayerStore((state) => state.isTrackOffline);
 
   useEffect(() => {
     let mounted = true;
@@ -77,7 +86,26 @@ export default function AlbumDetailScreen() {
     preloadQueue(queue).catch((error) => {
       console.log("Falha no preload do álbum:", error);
     });
-  }, [queue, preloadQueue]);
+
+    hydrateOfflineState(queue.map((item) => item.contentId)).catch((error) => {
+      console.log("Falha ao verificar estado offline:", error);
+    });
+  }, [queue, preloadQueue, hydrateOfflineState]);
+
+  const offlineCount = queue.filter((item) =>
+    isTrackOffline(item.contentId)
+  ).length;
+  const allOffline = queue.length > 0 && offlineCount === queue.length;
+
+  const handleDownloadAlbum = async () => {
+    try {
+      await downloadAlbumOffline(queue);
+      Alert.alert("Offline", "Álbum descarregado com sucesso.");
+    } catch (error) {
+      console.log("Erro ao descarregar álbum:", error);
+      Alert.alert("Erro", "Não foi possível descarregar o álbum.");
+    }
+  };
 
   const handleTrackPress = async (track: any) => {
     try {
@@ -164,6 +192,28 @@ export default function AlbumDetailScreen() {
           />
         </View>
 
+        <Pressable
+          style={[
+            styles.offlineButton,
+            (isDownloading || allOffline) && styles.offlineButtonDisabled,
+          ]}
+          onPress={handleDownloadAlbum}
+          disabled={isDownloading || allOffline}
+        >
+          <Ionicons
+            name={allOffline ? "checkmark-circle" : "download-outline"}
+            size={20}
+            color={colors.white}
+          />
+          <Text style={styles.offlineButtonText}>
+            {isDownloading
+              ? "A descarregar..."
+              : allOffline
+              ? "Álbum disponível offline"
+              : `Descarregar álbum (${offlineCount}/${queue.length})`}
+          </Text>
+        </Pressable>
+
         <Text style={styles.section}>Faixas</Text>
 
         {tracks.length === 0 ? (
@@ -171,6 +221,7 @@ export default function AlbumDetailScreen() {
         ) : (
           tracks.map((track: any) => {
             const active = currentTrack?.id === track.id;
+            const offline = isTrackOffline(track.id);
 
             return (
               <View
@@ -182,17 +233,32 @@ export default function AlbumDetailScreen() {
                   onPress={() => handleTrackPress(track)}
                 />
 
-                {active ? (
-                  <Text style={styles.status}>
-                    {isLoading
-                      ? "A preparar..."
-                      : isBuffering
-                      ? "A estabilizar ligação..."
-                      : isPlaying
-                      ? "A tocar"
-                      : "Em pausa"}
-                  </Text>
-                ) : null}
+                <View style={styles.trackMetaRow}>
+                  {active ? (
+                    <Text style={styles.status}>
+                      {isLoading
+                        ? "A preparar..."
+                        : isBuffering
+                        ? "A estabilizar ligação..."
+                        : isPlaying
+                        ? "A tocar"
+                        : "Em pausa"}
+                    </Text>
+                  ) : (
+                    <View />
+                  )}
+
+                  {offline ? (
+                    <View style={styles.offlineBadge}>
+                      <Ionicons
+                        name="cloud-offline-outline"
+                        size={14}
+                        color={colors.white}
+                      />
+                      <Text style={styles.offlineBadgeText}>Offline</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
             );
           })
@@ -268,6 +334,25 @@ const styles = StyleSheet.create({
   purchaseWrapper: {
     marginTop: 18,
   },
+  offlineButton: {
+    marginTop: 14,
+    backgroundColor: colors.secondary,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  offlineButtonDisabled: {
+    opacity: 0.75,
+  },
+  offlineButtonText: {
+    color: colors.white,
+    fontWeight: "800",
+    fontSize: 15,
+  },
   section: {
     marginTop: 30,
     marginBottom: 10,
@@ -282,12 +367,34 @@ const styles = StyleSheet.create({
   trackWrapperActive: {
     backgroundColor: "rgba(255,255,255,0.04)",
   },
-  status: {
+  trackMetaRow: {
     marginTop: -4,
     marginBottom: 10,
     marginLeft: 12,
+    marginRight: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  status: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  offlineBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(0,175,242,0.20)",
+    borderWidth: 1,
+    borderColor: "rgba(0,175,242,0.35)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  offlineBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: "700",
   },
   emptyTitle: {
     color: colors.white,

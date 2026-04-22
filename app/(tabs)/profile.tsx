@@ -1,5 +1,6 @@
 import AppGradient from "@/src/components/AppGradient";
 import { useAuthStore } from "@/src/store/authStore";
+import { usePlayerStore } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { router } from "expo-router";
 import React from "react";
@@ -15,8 +16,15 @@ import {
 export default function ProfileScreen() {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const stopAndReset = usePlayerStore((state) => state.stopAndReset);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await stopAndReset();
+    } catch (error) {
+      console.log("Erro ao parar o player no logout:", error);
+    }
+
     logout();
     router.replace("/(auth)/login");
   };
@@ -50,11 +58,15 @@ export default function ProfileScreen() {
               return;
             }
 
-            // 🔥 LOGOUT IMEDIATO (IMPORTANTE PARA APPLE)
+            try {
+              await stopAndReset();
+            } catch (error) {
+              console.log("Erro ao parar o player ao eliminar conta:", error);
+            }
+
             logout();
             router.replace("/(auth)/login");
 
-            // opcional: feedback ao user
             Alert.alert(
               "Pedido iniciado",
               "Foste redireccionado para concluir a eliminação da conta."

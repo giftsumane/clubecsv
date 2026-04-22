@@ -1,14 +1,17 @@
 import AppGradient from "@/src/components/AppGradient";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
+import { Ionicons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import {
-  Alert, Image, Pressable,
+  Alert,
+  Image,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
 } from "react-native";
 
 export default function LoginScreen() {
@@ -17,16 +20,14 @@ export default function LoginScreen() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleLogin() {
     const cleanEmail = email.trim().toLowerCase();
 
     try {
       await login(cleanEmail, password);
-
       router.replace("/welcome");
-
-      
     } catch (error: any) {
       const data = error?.response?.data;
 
@@ -50,11 +51,11 @@ export default function LoginScreen() {
     <AppGradient>
       <View style={styles.container}>
         <View style={styles.header}>
-        <Image
-          source={require("@/assets/images/csv-logo.jpg")}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+          <Image
+            source={require("@/assets/images/csv-logo.jpg")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text style={styles.brand}>BEM VINDO AO CLUBE CSV</Text>
           <Text style={styles.title}>Entrar</Text>
           <Text style={styles.subtitle}>Entrar na tua conta</Text>
@@ -72,15 +73,38 @@ export default function LoginScreen() {
             style={styles.input}
           />
 
-          <TextInput
-            placeholder="Palavra-passe"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCorrect={false}
-            style={styles.input}
-          />
+          <View style={styles.passwordWrapper}>
+            <TextInput
+              placeholder="Palavra-passe"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCorrect={false}
+              style={styles.passwordInput}
+            />
+
+            <Pressable
+              onPress={() => setShowPassword((prev) => !prev)}
+              style={styles.eyeButton}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={22}
+                color="rgba(255,255,255,0.75)"
+              />
+            </Pressable>
+          </View>
+
+          <Pressable
+            onPress={() => router.push("/(auth)/forgot-password")}
+            style={styles.forgotPasswordContainer}
+          >
+            <Text style={styles.forgotPassword}>
+              Esqueci-me da palavra-passe
+            </Text>
+          </Pressable>
 
           <Pressable
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -149,6 +173,36 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     color: colors.white,
     fontSize: 15,
+  },
+  passwordWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 16,
+    marginBottom: 8,
+    paddingRight: 14,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.white,
+    fontSize: 15,
+  },
+  eyeButton: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  forgotPasswordContainer: {
+    alignItems: "flex-end",
+    marginBottom: 14,
+  },
+  forgotPassword: {
+    color: colors.yellow,
+    fontSize: 13,
+    fontWeight: "700",
   },
   button: {
     backgroundColor: colors.pink,

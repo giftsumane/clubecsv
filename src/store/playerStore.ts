@@ -1,4 +1,9 @@
-import { preloadPlayback, resolvePlaybackUrl } from "@/services/playback";
+import {
+  ensureOfflinePlayback,
+  isOfflineAvailable,
+  preloadPlayback,
+  resolvePlayableUri,
+} from "@/services/playback";
 import {
   createAudioPlayer,
   setAudioModeAsync,
@@ -17,6 +22,7 @@ export type Track = {
 
 type UrlCache = Record<number, string>;
 type PendingUrlMap = Partial<Record<number, Promise<string>>>;
+type OfflineMap = Record<number, boolean>;
 
 type PlayerState = {
   currentTrack: Track | null;
@@ -25,12 +31,14 @@ type PlayerState = {
   isPlaying: boolean;
   isLoading: boolean;
   isBuffering: boolean;
+  isDownloading: boolean;
   player: AudioPlayer | null;
   loadedUrl: string | null;
   playbackToken: number;
   position: number;
   duration: number;
   urlCache: UrlCache;
+  offlineMap: OfflineMap;
   transitionLock: boolean;
 
   setQueue: (tracks: Track[], startIndex?: number) => void;
@@ -41,15 +49,24 @@ type PlayerState = {
     indexOverride?: number,
     options?: { forceReload?: boolean; preservePosition?: number }
   ) => Promise<void>;
+  playFromQueueIndex: (index: number) => Promise<void>;
   playNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   togglePlayPause: () => Promise<void>;
   stopAndReset: () => Promise<void>;
   preloadQueue: (tracks: Track[], aroundIndex?: number) => Promise<void>;
   rememberUrl: (contentId: number, url: string) => void;
+  markOfflineAvailable: (contentId: number, value?: boolean) => void;
+  downloadTrackOffline: (track: Track) => Promise<string | null>;
+  downloadAlbumOffline: (tracks: Track[]) => Promise<void>;
+  isTrackOffline: (contentId: number) => boolean;
+  hydrateOfflineState: (contentIds: number[]) => Promise<void>;
+  seekTo: (seconds: number) => Promise<void>;
+  seekBy: (deltaSeconds: number) => Promise<void>;
 };
 
 let transitionTimeout: ReturnType<typeof setTimeout> | null = null;
+let resumeRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 let tokenCounter = 0;
 let switchChain: Promise<void> = Promise.resolve();
 let playbackSubscription: { remove?: () => void } | null = null;
@@ -76,6 +93,11 @@ function clearTransitionTimeout() {
   transitionTimeout = null;
 }
 
+function clearResumeRetryTimeout() {
+  if (resumeRetryTimeout) clearTimeout(resumeRetryTimeout);
+  resumeRetryTimeout = null;
+}
+
 function detachPlaybackListener() {
   try {
     playbackSubscription?.remove?.();
@@ -94,6 +116,12 @@ function normalizeQueue(tracks: Track[]) {
 
 function normalizePlaybackUrl(url: string): string {
   let normalized = (url || "").trim();
+
+  if (!normalized) return "";
+
+  if (normalized.startsWith("file://")) {
+    return normalized;
+  }
 
   normalized = normalized.replace(
     "https://bilhetes.csveventos.co.mz",
@@ -142,17 +170,15 @@ async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
     return normalizePlaybackUrl(cache[track.contentId]);
   }
 
-  if (track.url) {
-    return normalizePlaybackUrl(track.url);
-  }
-
   const existing = pendingUrlRequests[track.contentId];
   if (existing) return existing;
 
-  const request = resolvePlaybackUrl(track.contentId)
-    .then((url) => {
-      if (!url) throw new Error("URL vazia para reprodução.");
-      return normalizePlaybackUrl(url);
+  const request = resolvePlayableUri(track.contentId, {
+    preferOffline: true,
+  })
+    .then((uri) => {
+      if (!uri) throw new Error("URI vazia para reprodução.");
+      return normalizePlaybackUrl(uri);
     })
     .catch((error) => {
       if (track.url) return normalizePlaybackUrl(track.url);
@@ -167,6 +193,7 @@ async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
 }
 
 async function safePauseAndRemove(player: AudioPlayer | null) {
+  clearResumeRetryTimeout();
   detachPlaybackListener();
   stopMonitor();
 
@@ -178,6 +205,10 @@ async function safePauseAndRemove(player: AudioPlayer | null) {
 
   try {
     player.pause();
+  } catch {}
+
+  try {
+    (player as any).release?.();
   } catch {}
 
   try {
@@ -269,9 +300,6 @@ function startMonitor(token: number) {
     });
 
     const currentTrack = state.currentTrack;
-    const queue = state.queue;
-    const index = state.currentIndex;
-    const preservePosition = currentTime;
 
     if (!currentTrack) return;
 
@@ -306,21 +334,9 @@ function startMonitor(token: number) {
       stallRecoveryAttempts += 1;
       lastProgressAt = Date.now();
 
-      enqueueSwitch(async () => {
-        try {
-          const fresh = usePlayerStore.getState();
-          if (fresh.playbackToken !== token) return;
-
-          await fresh.playTrack(currentTrack, queue, index, {
-            forceReload: true,
-            preservePosition: preservePosition > 1 ? preservePosition - 0.4 : 0,
-          });
-        } catch (error) {
-          console.log("Erro ao recuperar stall com reload:", error);
-        } finally {
-          isRecoveringFromStall = false;
-        }
-      });
+      setTimeout(() => {
+        isRecoveringFromStall = false;
+      }, 1200);
 
       return;
     }
@@ -390,6 +406,29 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       isPlaying: desiredPlaying && isLoaded && playing,
     });
 
+    const shouldRetryPlay =
+      desiredPlaying &&
+      isLoaded &&
+      !playing &&
+      !buffering &&
+      !didJustFinish;
+
+    if (shouldRetryPlay) {
+      clearResumeRetryTimeout();
+
+      resumeRetryTimeout = setTimeout(() => {
+        const fresh = usePlayerStore.getState();
+        if (fresh.playbackToken !== token) return;
+        if (!desiredPlaying || !fresh.player) return;
+
+        try {
+          fresh.player.play();
+        } catch {}
+      }, 120);
+    } else {
+      clearResumeRetryTimeout();
+    }
+
     const freshState = usePlayerStore.getState();
     const nextTrack = freshState.queue[freshState.currentIndex + 1];
 
@@ -403,6 +442,9 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       resolveTrackUrl(nextTrack, freshState.urlCache)
         .then((nextUrl) => {
           rememberTrackUrlInState(nextTrack.contentId, nextUrl);
+          if (nextUrl.startsWith("file://")) {
+            freshState.markOfflineAvailable(nextTrack.contentId, true);
+          }
         })
         .catch(() => {
           preloadedContentIds.delete(nextTrack.contentId);
@@ -410,6 +452,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     }
 
     if (didJustFinish) {
+      clearResumeRetryTimeout();
       clearTransitionTimeout();
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
@@ -522,12 +565,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
   isLoading: false,
   isBuffering: false,
+  isDownloading: false,
   player: null,
   loadedUrl: null,
   playbackToken: 0,
   position: 0,
   duration: 0,
   urlCache: {},
+  offlineMap: {},
   transitionLock: false,
 
   rememberUrl: (contentId, url) => {
@@ -538,6 +583,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         ...state.urlCache,
         [contentId]: normalizedUrl,
       },
+      offlineMap:
+        normalizedUrl.startsWith("file://")
+          ? {
+              ...state.offlineMap,
+              [contentId]: true,
+            }
+          : state.offlineMap,
       queue: state.queue.map((item) =>
         item.contentId === contentId ? { ...item, url: normalizedUrl } : item
       ),
@@ -545,6 +597,41 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         state.currentTrack?.contentId === contentId
           ? { ...state.currentTrack, url: normalizedUrl }
           : state.currentTrack,
+    }));
+  },
+
+  markOfflineAvailable: (contentId, value = true) => {
+    set((state) => ({
+      offlineMap: {
+        ...state.offlineMap,
+        [contentId]: value,
+      },
+    }));
+  },
+
+  isTrackOffline: (contentId) => {
+    return !!get().offlineMap[contentId];
+  },
+
+  hydrateOfflineState: async (contentIds) => {
+    const uniqueIds = [...new Set(contentIds.filter(Boolean))];
+    if (!uniqueIds.length) return;
+
+    const entries = await Promise.all(
+      uniqueIds.map(async (contentId) => ({
+        contentId,
+        available: await isOfflineAvailable(contentId),
+      }))
+    );
+
+    set((state) => ({
+      offlineMap: {
+        ...state.offlineMap,
+        ...entries.reduce<Record<number, boolean>>((acc, item) => {
+          acc[item.contentId] = item.available;
+          return acc;
+        }, {}),
+      },
     }));
   },
 
@@ -559,6 +646,56 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue: safeTracks,
       currentIndex: safeIndex,
     });
+  },
+
+  downloadTrackOffline: async (track) => {
+    if (!track?.contentId) return null;
+
+    try {
+      set({ isDownloading: true });
+
+      const localUri = await ensureOfflinePlayback(track.contentId, {
+        forceRefresh: false,
+      });
+
+      if (localUri?.startsWith("file://")) {
+        get().rememberUrl(track.contentId, localUri);
+        get().markOfflineAvailable(track.contentId, true);
+      }
+
+      return localUri ?? null;
+    } catch (error) {
+      console.log("Erro ao descarregar faixa offline:", error);
+      return null;
+    } finally {
+      set({ isDownloading: false });
+    }
+  },
+
+  downloadAlbumOffline: async (tracks) => {
+    const safeTracks = normalizeQueue(tracks);
+    if (!safeTracks.length) return;
+
+    try {
+      set({ isDownloading: true });
+
+      for (const track of safeTracks) {
+        try {
+          const localUri = await ensureOfflinePlayback(track.contentId, {
+            forceRefresh: false,
+          });
+
+          if (localUri?.startsWith("file://")) {
+            get().rememberUrl(track.contentId, localUri);
+            get().markOfflineAvailable(track.contentId, true);
+          }
+        } catch (error) {
+          console.log("Erro ao descarregar faixa do álbum:", track.title, error);
+        }
+      }
+    } finally {
+      set({ isDownloading: false });
+    }
   },
 
   preloadQueue: async (tracks, aroundIndex = 0) => {
@@ -585,6 +722,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       await preloadPlayback(idsToWarm, {
         concurrency: 2,
         delayMs: 120,
+        offline: true,
       }).catch(() => {});
     }
 
@@ -595,6 +733,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       try {
         const url = await resolveTrackUrl(track, get().urlCache);
         get().rememberUrl(track.contentId, url);
+
+        if (url.startsWith("file://")) {
+          get().markOfflineAvailable(track.contentId, true);
+        }
       } catch {}
     }
   },
@@ -635,6 +777,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     desiredPlaying = true;
     clearTransitionTimeout();
+    clearResumeRetryTimeout();
     stopMonitor();
     isRecoveringFromStall = false;
 
@@ -685,6 +828,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       get().rememberUrl(track.contentId, playbackUrl);
 
+      if (playbackUrl.startsWith("file://")) {
+        get().markOfflineAvailable(track.contentId, true);
+      }
+
       if (sameTrack && currentPlayer) {
         attachPlaybackListener(currentPlayer, token);
         activateLockScreen(currentPlayer, { ...track, url: playbackUrl });
@@ -727,7 +874,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       const player = createAudioPlayer(playbackUrl, {
         updateInterval: 0.25,
-        downloadFirst: false,
+        downloadFirst: true,
         keepAudioSessionActive: true,
       });
 
@@ -805,6 +952,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const isStillActive = latestState.playbackToken === token;
 
       clearTransitionTimeout();
+      clearResumeRetryTimeout();
 
       if (isStillActive) {
         desiredPlaying = false;
@@ -832,6 +980,58 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
 
+  seekTo: async (seconds) => {
+    const { player, duration, currentTrack } = get();
+    if (!player) return;
+
+    const safeDuration = Math.max(0, Number(duration || 0));
+    const target = Math.max(0, Math.min(Number(seconds || 0), safeDuration || Number(seconds || 0)));
+
+    try {
+      player.seekTo(target);
+
+      if (currentTrack) {
+        activateLockScreen(player, currentTrack);
+      }
+
+      lastObservedPosition = target;
+      lastProgressAt = Date.now();
+      stallRecoveryAttempts = 0;
+      isRecoveringFromStall = false;
+
+      set({
+        position: target,
+      });
+    } catch (error) {
+      console.log("Erro ao avançar/recuar para posição:", error);
+    }
+  },
+
+  seekBy: async (deltaSeconds) => {
+    const { position } = get();
+    const currentPosition = Math.max(0, Number(position || 0));
+    const target = currentPosition + Number(deltaSeconds || 0);
+
+    await get().seekTo(target);
+  },
+
+  playFromQueueIndex: async (index) => {
+    const { queue, transitionLock } = get();
+
+    if (transitionLock) return;
+    if (index < 0 || index >= queue.length) return;
+
+    desiredPlaying = true;
+
+    await enqueueSwitch(async () => {
+      const fresh = get();
+      if (fresh.transitionLock) return;
+      if (index < 0 || index >= fresh.queue.length) return;
+
+      await fresh.playTrack(fresh.queue[index], fresh.queue, index);
+    });
+  },
+
   playNext: async () => {
     const { queue, currentIndex, transitionLock } = get();
     if (transitionLock) return;
@@ -841,6 +1041,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (nextIndex >= queue.length) {
       desiredPlaying = false;
       clearTransitionTimeout();
+      clearResumeRetryTimeout();
       isRecoveringFromStall = false;
       stallRecoveryAttempts = 0;
 
@@ -872,20 +1073,25 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playPrevious: async () => {
-    const { currentIndex, position, transitionLock, player, currentTrack } = get();
+    const { currentIndex, position, transitionLock, player, currentTrack } =
+      get();
     if (transitionLock) return;
 
     if (position > 3 && currentIndex >= 0 && player) {
       desiredPlaying = true;
       isRecoveringFromStall = false;
+      clearResumeRetryTimeout();
 
       try {
         player.seekTo(0);
-        activateLockScreen(player, currentTrack ?? {
-          id: 0,
-          contentId: 0,
-          title: "Clube CSV",
-        });
+        activateLockScreen(
+          player,
+          currentTrack ?? {
+            id: 0,
+            contentId: 0,
+            title: "Clube CSV",
+          }
+        );
         player.play();
 
         lastObservedPosition = 0;
@@ -941,6 +1147,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         desiredPlaying = false;
         clearTransitionTimeout();
+        clearResumeRetryTimeout();
         isRecoveringFromStall = false;
         stopMonitor();
 
@@ -962,6 +1169,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       console.log("RESUME REQUESTED");
 
       desiredPlaying = true;
+      clearResumeRetryTimeout();
 
       if (currentTrack) {
         activateLockScreen(player, currentTrack);
@@ -974,9 +1182,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isRecoveringFromStall = false;
 
       set({
-        isLoading: false,
+        isLoading: true,
         isBuffering: false,
-        isPlaying: true,
+        isPlaying: false,
       });
 
       startMonitor(get().playbackToken);
@@ -992,6 +1200,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     desiredPlaying = false;
     clearTransitionTimeout();
+    clearResumeRetryTimeout();
     detachPlaybackListener();
     stopMonitor();
     isRecoveringFromStall = false;

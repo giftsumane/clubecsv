@@ -1,6 +1,7 @@
 import AppGradient from "@/src/components/AppGradient";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
+import { Ionicons } from "@expo/vector-icons";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import {
@@ -20,6 +21,7 @@ export default function RegisterScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleRegister() {
     try {
@@ -29,7 +31,6 @@ export default function RegisterScreen() {
         pathname: "/(auth)/verify-email",
         params: { email: email.trim().toLowerCase() },
       });
-      
     } catch (error: any) {
       console.log(error?.response?.data || error);
       Alert.alert("Erro", error?.response?.data?.message || "Falha no registo.");
@@ -41,10 +42,10 @@ export default function RegisterScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Image
-                    source={require("@/assets/images/csv-logo.jpg")}
-                    style={styles.logo}
-                    resizeMode="contain"
-                  />
+            source={require("@/assets/images/csv-logo.jpg")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text style={styles.brand}>CLUBE CSV</Text>
           <Text style={styles.title}>Criar conta</Text>
           <Text style={styles.subtitle}>
@@ -71,14 +72,29 @@ export default function RegisterScreen() {
             style={styles.input}
           />
 
-          <TextInput
-            placeholder="Palavra-passe"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            style={styles.input}
-          />
+          <View style={styles.passwordWrapper}>
+            <TextInput
+              placeholder="Palavra-passe"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCorrect={false}
+              style={styles.passwordInput}
+            />
+
+            <Pressable
+              onPress={() => setShowPassword((prev) => !prev)}
+              style={styles.eyeButton}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={22}
+                color="rgba(255,255,255,0.75)"
+              />
+            </Pressable>
+          </View>
 
           <Pressable
             style={[styles.button, loading && styles.buttonDisabled]}
@@ -143,6 +159,27 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     color: colors.white,
     fontSize: 15,
+  },
+  passwordWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 16,
+    marginBottom: 14,
+    paddingRight: 14,
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.white,
+    fontSize: 15,
+  },
+  eyeButton: {
+    justifyContent: "center",
+    alignItems: "center",
   },
   button: {
     backgroundColor: colors.orange,
