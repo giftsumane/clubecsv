@@ -2,12 +2,14 @@ import AppGradient from "@/src/components/AppGradient";
 import { useAuthStore } from "@/src/store/authStore";
 import { usePlayerStore } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React from "react";
 import {
   Alert,
   Linking,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -25,8 +27,40 @@ export default function ProfileScreen() {
       console.log("Erro ao parar o player no logout:", error);
     }
 
-    logout();
+    await logout();
     router.replace("/(auth)/login");
+  };
+
+  const openWhatsApp = async () => {
+    const phone = "258850777773";
+
+    const message = encodeURIComponent(
+      "Olá Clube CSV, preciso de ajuda com a app."
+    );
+
+    const url = `https://wa.me/${phone}?text=${message}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Erro", "Não foi possível abrir o WhatsApp.");
+    }
+  };
+
+  const openEmail = async () => {
+    try {
+      await Linking.openURL("mailto:info@csveventos.co.mz");
+    } catch {
+      Alert.alert("Erro", "Não foi possível abrir o email.");
+    }
+  };
+
+  const openWebsite = async () => {
+    try {
+      await Linking.openURL("https://csveventos.co.mz");
+    } catch {
+      Alert.alert("Erro", "Não foi possível abrir o website.");
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -53,7 +87,7 @@ export default function ProfileScreen() {
 
             try {
               await Linking.openURL(url);
-            } catch (e) {
+            } catch {
               Alert.alert("Erro", "Não foi possível abrir a página.");
               return;
             }
@@ -61,10 +95,14 @@ export default function ProfileScreen() {
             try {
               await stopAndReset();
             } catch (error) {
-              console.log("Erro ao parar o player ao eliminar conta:", error);
+              console.log(
+                "Erro ao parar o player ao eliminar conta:",
+                error
+              );
             }
 
-            logout();
+            await logout();
+
             router.replace("/(auth)/login");
 
             Alert.alert(
@@ -79,23 +117,72 @@ export default function ProfileScreen() {
 
   return (
     <AppGradient>
-      <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.kicker}>A tua conta</Text>
+
         <Text style={styles.title}>Perfil</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Nome</Text>
+
           <Text style={styles.value}>{user?.name || "-"}</Text>
 
           <Text style={[styles.label, { marginTop: 12 }]}>Email</Text>
+
           <Text style={styles.value}>{user?.email || "-"}</Text>
+    
+        </View>
+
+        <View style={styles.helpCard}>
+          <Text style={styles.helpTitle}>Ajuda e contactos</Text>
+
+          <Text style={styles.helpText}>
+            Precisas de ajuda com compras, acesso à conta,
+            música ou bilhetes? Fala connosco.
+          </Text>
+
+          <Pressable
+            style={styles.helpButton}
+            onPress={openWhatsApp}
+          >
+            <Ionicons
+              name="logo-whatsapp"
+              size={20}
+              color={colors.white}
+            />
+
+            <Text style={styles.helpButtonText}>
+              Falar no WhatsApp
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.helpButton}
+            onPress={openEmail}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={20}
+              color={colors.white}
+            />
+
+            <Text style={styles.helpButtonText}>
+              info@csveventos.co.mz
+            </Text>
+          </Pressable>
+
         </View>
 
         <Pressable
           style={styles.secondaryButton}
           onPress={() => router.push("/tickets")}
         >
-          <Text style={styles.secondaryButtonText}>Meus Bilhetes</Text>
+          <Text style={styles.secondaryButtonText}>
+            Meus Bilhetes
+          </Text>
         </Pressable>
 
         <Pressable
@@ -107,24 +194,36 @@ export default function ProfileScreen() {
           </Text>
         </Pressable>
 
-        <Pressable style={styles.button} onPress={handleLogout}>
-          <Text style={styles.buttonText}>Terminar sessão</Text>
+        <Pressable
+          style={styles.button}
+          onPress={handleLogout}
+        >
+          <Text style={styles.buttonText}>
+            Terminar sessão
+          </Text>
         </Pressable>
 
-        <Pressable style={styles.deleteButton} onPress={handleDeleteAccount}>
-          <Text style={styles.deleteButtonText}>Eliminar Conta</Text>
+        <Pressable
+          style={styles.deleteButton}
+          onPress={handleDeleteAccount}
+        >
+          <Text style={styles.deleteButtonText}>
+            Eliminar Conta
+          </Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </AppGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 16,
     paddingTop: 40,
+    paddingBottom: 180,
   },
+
   kicker: {
     color: colors.yellow,
     fontSize: 13,
@@ -133,12 +232,14 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 8,
   },
+
   title: {
     fontSize: 28,
     fontWeight: "800",
     marginBottom: 20,
     color: colors.white,
   },
+
   card: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
@@ -146,16 +247,60 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
   },
+
   label: {
     color: colors.textMuted,
     fontSize: 13,
   },
+
   value: {
     fontSize: 16,
     fontWeight: "700",
     marginTop: 4,
     color: colors.white,
   },
+
+  helpCard: {
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 18,
+    padding: 16,
+  },
+
+  helpTitle: {
+    color: colors.white,
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+
+  helpText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+
+  helpButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    padding: 14,
+    borderRadius: 14,
+    marginTop: 10,
+  },
+
+  helpButtonText: {
+    color: colors.white,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+
   secondaryButton: {
     marginTop: 20,
     backgroundColor: "rgba(255,255,255,0.1)",
@@ -165,10 +310,12 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
   },
+
   secondaryButtonText: {
     fontWeight: "700",
     color: colors.white,
   },
+
   button: {
     marginTop: 12,
     backgroundColor: colors.pink,
@@ -176,12 +323,15 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
   },
+
   buttonText: {
     color: colors.white,
     fontWeight: "800",
   },
+
   deleteButton: {
     marginTop: 20,
+    marginBottom: 40,
     borderWidth: 1,
     borderColor: "rgba(255,0,0,0.4)",
     backgroundColor: "rgba(255,0,0,0.08)",
@@ -189,6 +339,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
   },
+
   deleteButtonText: {
     color: "#FF4D4D",
     fontWeight: "800",

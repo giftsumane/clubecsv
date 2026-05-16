@@ -802,12 +802,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       await setAudioModeAsync({
         playsInSilentMode: true,
         shouldPlayInBackground: true,
-      
-        interruptionMode: "duckOthers",
-      
+        interruptionMode: "doNotMix",
+        interruptionModeAndroid: "doNotMix",
         shouldRouteThroughEarpiece: false,
-      
-        allowsRecording: false,
       });
 
       const playbackUrl = await Promise.race([
