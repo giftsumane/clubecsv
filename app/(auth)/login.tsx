@@ -1,4 +1,5 @@
 import AppGradient from "@/src/components/AppGradient";
+import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,12 +8,14 @@ import { useState } from "react";
 import {
   Alert,
   Image,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
@@ -49,79 +52,85 @@ export default function LoginScreen() {
 
   return (
     <AppGradient>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Image
-            source={require("@/assets/images/csv-logo.jpg")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.brand}>BEM VINDO AO CLUBE CSV</Text>
-          <Text style={styles.title}>Entrar</Text>
-          <Text style={styles.subtitle}>Entrar na tua conta</Text>
-        </View>
-
-        <View style={styles.form}>
-          <TextInput
-            placeholder="Email"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoCorrect={false}
-            style={styles.input}
-          />
-
-          <View style={styles.passwordWrapper}>
-            <TextInput
-              placeholder="Palavra-passe"
-              placeholderTextColor="rgba(255,255,255,0.6)"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-              autoCorrect={false}
-              style={styles.passwordInput}
+      <DismissKeyboardView>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Image
+              source={require("@/assets/images/csv-logo.jpg")}
+              style={styles.logo}
+              resizeMode="contain"
             />
-
-            <Pressable
-              onPress={() => setShowPassword((prev) => !prev)}
-              style={styles.eyeButton}
-              hitSlop={10}
-            >
-              <Ionicons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={22}
-                color="rgba(255,255,255,0.75)"
-              />
-            </Pressable>
+  
+            <Text style={styles.brand}>BEM VINDO AO CLUBE CSV</Text>
+            <Text style={styles.title}>Entrar</Text>
+            <Text style={styles.subtitle}>Entrar na tua conta</Text>
           </View>
-
-          <Pressable
-            onPress={() => router.push("/(auth)/forgot-password")}
-            style={styles.forgotPasswordContainer}
-          >
-            <Text style={styles.forgotPassword}>
-              Esqueci-me da palavra-passe
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? "A entrar..." : "Entrar"}
-            </Text>
-          </Pressable>
-
-          <Link href="/(auth)/register" style={styles.link}>
-            Ainda não tens conta?{" "}
-            <Text style={styles.linkStrong}>Criar conta</Text>
-          </Link>
+  
+          <View style={styles.form}>
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoCorrect={false}
+              returnKeyType="next"
+              style={styles.input}
+            />
+  
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                placeholder="Palavra-passe"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={Keyboard.dismiss}
+                style={styles.passwordInput}
+              />
+  
+              <Pressable
+                onPress={() => setShowPassword((prev) => !prev)}
+                style={styles.eyeButton}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={22}
+                  color="rgba(255,255,255,0.75)"
+                />
+              </Pressable>
+            </View>
+  
+            <Pressable
+              onPress={() => router.push("/(auth)/forgot-password")}
+              style={styles.forgotPasswordContainer}
+            >
+              <Text style={styles.forgotPassword}>
+                Esqueci-me da palavra-passe
+              </Text>
+            </Pressable>
+  
+            <Pressable
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "A entrar..." : "Entrar"}
+              </Text>
+            </Pressable>
+  
+            <Link href="/(auth)/register" style={styles.link}>
+              Ainda não tens conta?{" "}
+              <Text style={styles.linkStrong}>Criar conta</Text>
+            </Link>
+          </View>
         </View>
-      </View>
+      </DismissKeyboardView>
     </AppGradient>
   );
 }

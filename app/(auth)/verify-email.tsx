@@ -1,16 +1,26 @@
 import AppGradient from "@/src/components/AppGradient";
+import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 export default function VerifyEmailScreen() {
   const params = useLocalSearchParams<{ email?: string }>();
   const email = params.email || "";
 
   const verifyEmailCode = useAuthStore((state) => state.verifyEmailCode);
-  const resendVerificationCode = useAuthStore((state) => state.resendVerificationCode);
+  const resendVerificationCode = useAuthStore(
+    (state) => state.resendVerificationCode
+  );
   const loading = useAuthStore((state) => state.loading);
 
   const [code, setCode] = useState("");
@@ -20,7 +30,10 @@ export default function VerifyEmailScreen() {
       await verifyEmailCode(email, code);
       router.replace("/welcome");
     } catch (error: any) {
-      Alert.alert("Erro", error?.response?.data?.message || "Não foi possível verificar o email.");
+      Alert.alert(
+        "Erro",
+        error?.response?.data?.message || "Não foi possível verificar o email."
+      );
     }
   }
 
@@ -29,42 +42,49 @@ export default function VerifyEmailScreen() {
       await resendVerificationCode(email);
       Alert.alert("Sucesso", "Enviámos um novo código para o teu email.");
     } catch (error: any) {
-      Alert.alert("Erro", error?.response?.data?.message || "Falha ao reenviar o código.");
+      Alert.alert(
+        "Erro",
+        error?.response?.data?.message || "Falha ao reenviar o código."
+      );
     }
   }
 
   return (
     <AppGradient>
-      <View style={styles.container}>
-        <Text style={styles.title}>Verificar email</Text>
-        <Text style={styles.subtitle}>
-          Introduz o código enviado para {email}
-        </Text>
+      <DismissKeyboardView>
+        <View style={styles.container}>
+          <Text style={styles.title}>Verificar email</Text>
 
-        <TextInput
-          placeholder="Código de 6 dígitos"
-          placeholderTextColor="rgba(255,255,255,0.6)"
-          value={code}
-          onChangeText={setCode}
-          keyboardType="number-pad"
-          maxLength={6}
-          style={styles.input}
-        />
-
-        <Pressable
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleVerify}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>
-            {loading ? "A verificar..." : "Confirmar email"}
+          <Text style={styles.subtitle}>
+            Introduz o código enviado para {email}
           </Text>
-        </Pressable>
 
-        <Pressable onPress={handleResend}>
-          <Text style={styles.link}>Reenviar código</Text>
-        </Pressable>
-      </View>
+          <TextInput
+            placeholder="Código de 6 dígitos"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            value={code}
+            onChangeText={setCode}
+            keyboardType="number-pad"
+            returnKeyType="done"
+            maxLength={6}
+            style={styles.input}
+          />
+
+          <Pressable
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleVerify}
+            disabled={loading}
+          >
+            <Text style={styles.buttonText}>
+              {loading ? "A verificar..." : "Confirmar email"}
+            </Text>
+          </Pressable>
+
+          <Pressable onPress={handleResend}>
+            <Text style={styles.link}>Reenviar código</Text>
+          </Pressable>
+        </View>
+      </DismissKeyboardView>
     </AppGradient>
   );
 }

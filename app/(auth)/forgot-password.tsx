@@ -1,15 +1,16 @@
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
+import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { colors } from "@/src/theme/colors";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 export default function ForgotPasswordScreen() {
@@ -43,6 +44,7 @@ export default function ForgotPasswordScreen() {
       ]);
     } catch (error: any) {
       console.log(error?.response?.data || error);
+
       Alert.alert(
         "Erro",
         error?.response?.data?.message ||
@@ -55,40 +57,43 @@ export default function ForgotPasswordScreen() {
 
   return (
     <AppGradient>
-      <View style={styles.container}>
-        <Text style={styles.kicker}>RECUPERAÇÃO</Text>
-        <Text style={styles.title}>Recuperar palavra-passe</Text>
-        <Text style={styles.subtitle}>
-          Introduz o teu email para receberes um código OTP.
-        </Text>
+      <DismissKeyboardView>
+        <View style={styles.container}>
+          <Text style={styles.kicker}>RECUPERAÇÃO</Text>
+          <Text style={styles.title}>Recuperar palavra-passe</Text>
+          <Text style={styles.subtitle}>
+            Introduz o teu email para receberes um código OTP.
+          </Text>
 
-        <View style={styles.form}>
-          <TextInput
-            placeholder="Email"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoCorrect={false}
-            style={styles.input}
-          />
+          <View style={styles.form}>
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoCorrect={false}
+              returnKeyType="done"
+              style={styles.input}
+            />
 
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleSendOtp}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? "A enviar..." : "Enviar código OTP"}
-            </Text>
-          </Pressable>
+            <Pressable
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleSendOtp}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "A enviar..." : "Enviar código OTP"}
+              </Text>
+            </Pressable>
 
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.backLink}>Voltar ao login</Text>
-          </Pressable>
+            <Pressable onPress={() => router.back()}>
+              <Text style={styles.backLink}>Voltar ao login</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </DismissKeyboardView>
     </AppGradient>
   );
 }

@@ -1,9 +1,10 @@
 import { api } from "@/src/api/client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-export async function register(name: string, email: string, password: string) {
+export async function register(name: string, email: string, phone: string, password: string) {
   const { data } = await api.post("/register", {
     name,
     email,
+    phone,
     password,
     password_confirmation: password,
   });

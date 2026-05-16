@@ -1,4 +1,5 @@
 import AppGradient from "@/src/components/AppGradient";
+import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,12 +21,14 @@ export default function RegisterScreen() {
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  
 
   async function handleRegister() {
     try {
-      await register(name, email, password);
+      await register(name, email, phone, password);
 
       router.push({
         pathname: "/(auth)/verify-email",
@@ -39,78 +42,95 @@ export default function RegisterScreen() {
 
   return (
     <AppGradient>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Image
-            source={require("@/assets/images/csv-logo.jpg")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.brand}>CLUBE CSV</Text>
-          <Text style={styles.title}>Criar conta</Text>
-          <Text style={styles.subtitle}>
-            Regista-te para comprar, ouvir e gerir os teus conteúdos.
-          </Text>
-        </View>
-
-        <View style={styles.form}>
-          <TextInput
-            placeholder="Nome"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={name}
-            onChangeText={setName}
-            style={styles.input}
-          />
-
-          <TextInput
-            placeholder="Email"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={styles.input}
-          />
-
-          <View style={styles.passwordWrapper}>
-            <TextInput
-              placeholder="Palavra-passe"
-              placeholderTextColor="rgba(255,255,255,0.6)"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-              autoCorrect={false}
-              style={styles.passwordInput}
+      <DismissKeyboardView>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Image
+              source={require("@/assets/images/csv-logo.jpg")}
+              style={styles.logo}
+              resizeMode="contain"
             />
 
-            <Pressable
-              onPress={() => setShowPassword((prev) => !prev)}
-              style={styles.eyeButton}
-              hitSlop={10}
-            >
-              <Ionicons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={22}
-                color="rgba(255,255,255,0.75)"
-              />
-            </Pressable>
+            <Text style={styles.brand}>CLUBE CSV</Text>
+            <Text style={styles.title}>Criar conta</Text>
+            <Text style={styles.subtitle}>
+              Regista-te para comprar, ouvir e gerir os teus conteúdos.
+            </Text>
           </View>
 
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? "A criar..." : "Criar conta"}
-            </Text>
-          </Pressable>
+          <View style={styles.form}>
+            <TextInput
+              placeholder="Nome"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={name}
+              onChangeText={setName}
+              returnKeyType="next"
+              style={styles.input}
+            />
 
-          <Link href="/(auth)/login" style={styles.link}>
-            Já tens conta? <Text style={styles.linkStrong}>Entrar</Text>
-          </Link>
+            <TextInput
+              placeholder="Email"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoCorrect={false}
+              returnKeyType="next"
+              style={styles.input}
+            />
+
+            <TextInput
+              placeholder="Telefone / WhatsApp"
+              placeholderTextColor="rgba(255,255,255,0.6)"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              returnKeyType="next"
+              style={styles.input}
+            />
+
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                placeholder="Palavra-passe"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCorrect={false}
+                returnKeyType="done"
+                style={styles.passwordInput}
+              />
+
+              <Pressable
+                onPress={() => setShowPassword((prev) => !prev)}
+                style={styles.eyeButton}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={22}
+                  color="rgba(255,255,255,0.75)"
+                />
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleRegister}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "A criar..." : "Criar conta"}
+              </Text>
+            </Pressable>
+
+            <Link href="/(auth)/login" style={styles.link}>
+              Já tens conta? <Text style={styles.linkStrong}>Entrar</Text>
+            </Link>
+          </View>
         </View>
-      </View>
+      </DismissKeyboardView>
     </AppGradient>
   );
 }

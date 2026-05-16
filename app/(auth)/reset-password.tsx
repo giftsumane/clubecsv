@@ -1,16 +1,17 @@
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
+import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
-    Alert,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 export default function ResetPasswordScreen() {
@@ -88,105 +89,109 @@ export default function ResetPasswordScreen() {
 
   return (
     <AppGradient>
-      <View style={styles.container}>
-        <Text style={styles.kicker}>RECUPERAÇÃO</Text>
-        <Text style={styles.title}>Redefinir palavra-passe</Text>
-        <Text style={styles.subtitle}>
-          Introduz o código recebido por email e define a tua nova palavra-passe.
-        </Text>
+      <DismissKeyboardView>
+        <View style={styles.container}>
+          <Text style={styles.kicker}>RECUPERAÇÃO</Text>
+          <Text style={styles.title}>Redefinir palavra-passe</Text>
+          <Text style={styles.subtitle}>
+            Introduz o código recebido por email e define a tua nova palavra-passe.
+          </Text>
 
-        <View style={styles.form}>
-          <TextInput
-            placeholder="Email"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoCorrect={false}
-            style={styles.input}
-          />
-
-          <TextInput
-            placeholder="Código OTP"
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            value={otp}
-            onChangeText={setOtp}
-            autoCapitalize="none"
-            keyboardType="number-pad"
-            style={styles.input}
-            maxLength={6}
-          />
-
-          <View style={styles.passwordWrapper}>
+          <View style={styles.form}>
             <TextInput
-              placeholder="Nova palavra-passe"
+              placeholder="Email"
               placeholderTextColor="rgba(255,255,255,0.6)"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
               autoCorrect={false}
-              style={styles.passwordInput}
+              returnKeyType="next"
+              style={styles.input}
             />
 
-            <Pressable
-              onPress={() => setShowPassword((prev) => !prev)}
-              style={styles.eyeButton}
-              hitSlop={10}
-            >
-              <Ionicons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={22}
-                color="rgba(255,255,255,0.75)"
-              />
-            </Pressable>
-          </View>
-
-          <View style={styles.passwordWrapper}>
             <TextInput
-              placeholder="Confirmar palavra-passe"
+              placeholder="Código OTP"
               placeholderTextColor="rgba(255,255,255,0.6)"
-              value={passwordConfirmation}
-              onChangeText={setPasswordConfirmation}
-              secureTextEntry={!showPasswordConfirmation}
-              autoCorrect={false}
-              style={styles.passwordInput}
+              value={otp}
+              onChangeText={setOtp}
+              autoCapitalize="none"
+              keyboardType="number-pad"
+              returnKeyType="next"
+              style={styles.input}
+              maxLength={6}
             />
 
-            <Pressable
-              onPress={() =>
-                setShowPasswordConfirmation((prev) => !prev)
-              }
-              style={styles.eyeButton}
-              hitSlop={10}
-            >
-              <Ionicons
-                name={
-                  showPasswordConfirmation
-                    ? "eye-off-outline"
-                    : "eye-outline"
-                }
-                size={22}
-                color="rgba(255,255,255,0.75)"
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                placeholder="Nova palavra-passe"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCorrect={false}
+                returnKeyType="next"
+                style={styles.passwordInput}
               />
+
+              <Pressable
+                onPress={() => setShowPassword((prev) => !prev)}
+                style={styles.eyeButton}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={22}
+                  color="rgba(255,255,255,0.75)"
+                />
+              </Pressable>
+            </View>
+
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                placeholder="Confirmar palavra-passe"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={passwordConfirmation}
+                onChangeText={setPasswordConfirmation}
+                secureTextEntry={!showPasswordConfirmation}
+                autoCorrect={false}
+                returnKeyType="done"
+                style={styles.passwordInput}
+              />
+
+              <Pressable
+                onPress={() => setShowPasswordConfirmation((prev) => !prev)}
+                style={styles.eyeButton}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name={
+                    showPasswordConfirmation
+                      ? "eye-off-outline"
+                      : "eye-outline"
+                  }
+                  size={22}
+                  color="rgba(255,255,255,0.75)"
+                />
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleResetPassword}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? "A actualizar..." : "Actualizar palavra-passe"}
+              </Text>
+            </Pressable>
+
+            <Pressable onPress={() => router.back()}>
+              <Text style={styles.backLink}>Voltar</Text>
             </Pressable>
           </View>
-
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleResetPassword}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? "A actualizar..." : "Actualizar palavra-passe"}
-            </Text>
-          </Pressable>
-
-          <Pressable onPress={() => router.back()}>
-            <Text style={styles.backLink}>Voltar</Text>
-          </Pressable>
         </View>
-      </View>
+      </DismissKeyboardView>
     </AppGradient>
   );
 }

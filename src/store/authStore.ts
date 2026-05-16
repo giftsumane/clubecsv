@@ -10,7 +10,7 @@ type AuthState = {
   isAuthenticated: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<any>;
-  register: (name: string, email: string, password: string) => Promise<any>;
+  register: (name: string, email: string, phone: string, password: string) => Promise<any>;
   verifyEmailCode: (email: string, code: string) => Promise<void>;
   resendVerificationCode: (email: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -44,13 +44,14 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      register: async (name, email, password) => {
+      register: async (name, email, phone, password) => {
         set({ loading: true });
 
         try {
           const { data } = await api.post('/register', {
             name,
             email,
+            phone,
             password,
             password_confirmation: password,
           });
