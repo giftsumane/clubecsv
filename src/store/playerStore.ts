@@ -82,6 +82,7 @@ let stallRecoveryAttempts = 0;
 let lastMonitorToken = 0;
 let isRecoveringFromStall = false;
 let lastStatusSignature = "";
+let appWasInterrupted = false;
 
 function nextToken() {
   tokenCounter += 1;
@@ -378,6 +379,14 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     const buffering = Boolean(
       status?.isBuffering ?? playerAny.isBuffering ?? false
     );
+
+    if (desiredPlaying && !playing && buffering) {
+      appWasInterrupted = true;
+    }
+    
+    if (appWasInterrupted && playing) {
+      appWasInterrupted = false;
+    }
     const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
     const didJustFinish = Boolean(status?.didJustFinish ?? false);
 
@@ -793,7 +802,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       await setAudioModeAsync({
         playsInSilentMode: true,
         shouldPlayInBackground: true,
-        interruptionMode: "doNotMix",
+      
+        interruptionMode: "duckOthers",
+      
+        shouldRouteThroughEarpiece: false,
+      
+        allowsRecording: false,
       });
 
       const playbackUrl = await Promise.race([
@@ -1208,6 +1222,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     lastObservedPosition = 0;
     lastProgressAt = 0;
     lastStatusSignature = "";
+    
 
     deactivateLockScreen(player);
     await safePauseAndRemove(player);
