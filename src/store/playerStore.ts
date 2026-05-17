@@ -415,28 +415,29 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       isPlaying: desiredPlaying && isLoaded && playing,
     });
 
-    const shouldRetryPlay =
-      desiredPlaying &&
-      isLoaded &&
-      !playing &&
-      !buffering &&
-      !didJustFinish;
-
-    if (shouldRetryPlay) {
-      clearResumeRetryTimeout();
-
-      resumeRetryTimeout = setTimeout(() => {
-        const fresh = usePlayerStore.getState();
-        if (fresh.playbackToken !== token) return;
-        if (!desiredPlaying || !fresh.player) return;
-
-        try {
-          fresh.player.play();
-        } catch {}
-      }, 120);
-    } else {
-      clearResumeRetryTimeout();
-    }
+    const looksLikeExternalPause =
+    desiredPlaying &&
+    isLoaded &&
+    !playing &&
+    !buffering &&
+    !didJustFinish &&
+    currentTime > 0.25;
+  
+  if (looksLikeExternalPause) {
+    console.log("EXTERNAL PAUSE DETECTED");
+  
+    desiredPlaying = false;
+    clearResumeRetryTimeout();
+    stopMonitor();
+  
+    usePlayerStore.setState({
+      isPlaying: false,
+      isLoading: false,
+      isBuffering: false,
+    });
+  } else {
+    clearResumeRetryTimeout();
+  }
 
     const freshState = usePlayerStore.getState();
     const nextTrack = freshState.queue[freshState.currentIndex + 1];
@@ -550,13 +551,23 @@ async function waitForPlayerReady(token: number, timeoutMs = 8000) {
 
 function activateLockScreen(player: AudioPlayer, track: Track) {
   try {
-    (player as any).setActiveForLockScreen?.(true, {
-      title: track.title,
-      artist: track.artistName || "Clube CSV",
-      albumTitle: "Clube CSV",
-      artworkUrl: track.cover_url ?? undefined,
-    });
-  } catch {}
+    (player as any).setActiveForLockScreen?.(
+      true,
+      {
+        title: track.title,
+        artist: track.artistName || "Clube CSV",
+        albumTitle: "Clube CSV",
+        artworkUrl: track.cover_url ?? undefined,
+      },
+      {
+        isLiveStream: false,
+        showSeekBackward: true,
+        showSeekForward: true,
+      }
+    );
+  } catch (error) {
+    console.log("Erro ao activar lockscreen:", error);
+  }
 }
 
 function deactivateLockScreen(player: AudioPlayer | null) {
