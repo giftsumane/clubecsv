@@ -22,6 +22,10 @@ export default function PlayerBar() {
   const duration = usePlayerStore((state) => state.duration);
   const currentIndex = usePlayerStore((state) => state.currentIndex);
   const queue = usePlayerStore((state) => state.queue);
+
+  const repeatMode = usePlayerStore((state) => state.repeatMode);
+  const toggleRepeatMode = usePlayerStore((state) => state.toggleRepeatMode);
+
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const playNext = usePlayerStore((state) => state.playNext);
   const playPrevious = usePlayerStore((state) => state.playPrevious);
@@ -35,8 +39,13 @@ export default function PlayerBar() {
   const progress =
     safeDuration > 0 ? Math.min(safePosition / safeDuration, 1) : 0;
 
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < queue.length - 1;
+  const hasPrev = repeatMode === "all" ? queue.length > 1 : currentIndex > 0;
+
+  const hasNext =
+    repeatMode === "all"
+      ? queue.length > 1
+      : currentIndex >= 0 && currentIndex < queue.length - 1;
+
   const isBusy = isLoading || isBuffering;
 
   const subtitle = isLoading
@@ -48,6 +57,12 @@ export default function PlayerBar() {
     : "Em pausa";
 
   const mainIcon = isBusy ? "hourglass-outline" : isPlaying ? "pause" : "play";
+
+  const repeatIconColor =
+    repeatMode === "off" ? "rgba(255,255,255,0.48)" : colors.yellow;
+
+  const repeatLabel =
+    repeatMode === "one" ? "1" : repeatMode === "all" ? "∞" : "";
 
   const openPlayerDetail = () => {
     if (pathname !== "/player") {
@@ -71,7 +86,10 @@ export default function PlayerBar() {
             onPress={openPlayerDetail}
           >
             {currentTrack.cover_url ? (
-              <Image source={{ uri: currentTrack.cover_url }} style={styles.cover} />
+              <Image
+                source={{ uri: currentTrack.cover_url }}
+                style={styles.cover}
+              />
             ) : (
               <View style={[styles.cover, styles.coverPlaceholder]}>
                 <Ionicons name="musical-notes" size={16} color={colors.white} />
@@ -106,6 +124,21 @@ export default function PlayerBar() {
         </View>
 
         <View style={styles.controlsRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.repeatButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={toggleRepeatMode}
+            hitSlop={8}
+          >
+            <Ionicons name="repeat" size={17} color={repeatIconColor} />
+
+            {!!repeatLabel && (
+              <Text style={styles.repeatLabel}>{repeatLabel}</Text>
+            )}
+          </Pressable>
+
           <Pressable
             style={({ pressed }) => [
               styles.seekButton,
@@ -176,6 +209,15 @@ export default function PlayerBar() {
 
         <View style={styles.bottomRow}>
           <Text style={styles.timeText}>{formatTime(safePosition)}</Text>
+
+          <Text style={styles.repeatModeText}>
+            {repeatMode === "off"
+              ? "Repetição desligada"
+              : repeatMode === "one"
+              ? "Repetir música"
+              : "Repetir lista"}
+          </Text>
+
           <Text style={styles.timeText}>{formatTime(safeDuration)}</Text>
         </View>
       </View>
@@ -192,6 +234,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     zIndex: 30,
   },
+
   container: {
     backgroundColor: "rgba(87,54,185,0.96)",
     borderRadius: 18,
@@ -206,6 +249,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     elevation: 9,
   },
+
   progressTrack: {
     height: 3,
     backgroundColor: "rgba(255,255,255,0.18)",
@@ -213,16 +257,19 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 8,
   },
+
   progressFill: {
     height: 3,
     backgroundColor: colors.yellow,
     borderRadius: 999,
   },
+
   topRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
+
   trackPressable: {
     flex: 1,
     flexDirection: "row",
@@ -230,38 +277,45 @@ const styles = StyleSheet.create({
     gap: 10,
     minWidth: 0,
   },
+
   cover: {
     width: 46,
     height: 46,
     borderRadius: 12,
     backgroundColor: "rgba(255,255,255,0.10)",
   },
+
   coverPlaceholder: {
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
+
   infoBlock: {
     flex: 1,
     minWidth: 0,
     justifyContent: "center",
   },
+
   title: {
     color: colors.white,
     fontSize: 14,
     fontWeight: "800",
   },
+
   artist: {
     color: "rgba(255,255,255,0.84)",
     fontSize: 11,
     marginTop: 1,
   },
+
   subtitle: {
     color: "rgba(255,255,255,0.66)",
     fontSize: 11,
     marginTop: 2,
   },
+
   controlsRow: {
     marginTop: 10,
     flexDirection: "row",
@@ -269,6 +323,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
+
+  repeatButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+
+  repeatLabel: {
+    position: "absolute",
+    top: 2,
+    right: 6,
+    color: colors.yellow,
+    fontSize: 9,
+    fontWeight: "900",
+  },
+
   seekButton: {
     minWidth: 42,
     height: 34,
@@ -282,11 +357,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 3,
   },
+
   seekText: {
     color: colors.white,
     fontSize: 10,
     fontWeight: "800",
   },
+
   smallIconButton: {
     width: 34,
     height: 34,
@@ -297,6 +374,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
   },
+
   mainPlayButton: {
     width: 38,
     height: 38,
@@ -305,9 +383,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
   mainPlayButtonBusy: {
     opacity: 0.9,
   },
+
   closeButton: {
     width: 30,
     height: 30,
@@ -320,20 +400,31 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     marginTop: 6,
   },
+
   bottomRow: {
     marginTop: 6,
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 2,
   },
+
   timeText: {
     color: "rgba(255,255,255,0.72)",
     fontSize: 10,
     fontWeight: "600",
   },
+
+  repeatModeText: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
   buttonDisabled: {
     opacity: 0.4,
   },
+
   buttonPressed: {
     opacity: 0.8,
     transform: [{ scale: 0.98 }],

@@ -40,6 +40,8 @@ type PlayerState = {
   urlCache: UrlCache;
   offlineMap: OfflineMap;
   transitionLock: boolean;
+  repeatMode: "off" | "one" | "all";
+  toggleRepeatMode: () => void;
 
   setQueue: (tracks: Track[], startIndex?: number) => void;
   setQueueAndPlay: (tracks: Track[], trackToPlay: Track) => Promise<void>;
@@ -584,7 +586,6 @@ function deactivateLockScreen(player: AudioPlayer | null) {
     (player as any).setActiveForLockScreen?.(false);
   } catch {}
 }
-
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   currentTrack: null,
   queue: [],
@@ -601,6 +602,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   urlCache: {},
   offlineMap: {},
   transitionLock: false,
+  repeatMode: "off",
+
+  toggleRepeatMode: () => {
+    const current = get().repeatMode;
+
+    const next =
+      current === "off" ? "one" : current === "one" ? "all" : "off";
+
+    set({ repeatMode: next });
+  },
 
   rememberUrl: (contentId, url) => {
     const normalizedUrl = normalizePlaybackUrl(url);
@@ -610,13 +621,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         ...state.urlCache,
         [contentId]: normalizedUrl,
       },
-      offlineMap:
-        normalizedUrl.startsWith("file://")
-          ? {
-              ...state.offlineMap,
-              [contentId]: true,
-            }
-          : state.offlineMap,
+      offlineMap: normalizedUrl.startsWith("file://")
+        ? {
+            ...state.offlineMap,
+            [contentId]: true,
+          }
+        : state.offlineMap,
       queue: state.queue.map((item) =>
         item.contentId === contentId ? { ...item, url: normalizedUrl } : item
       ),
@@ -793,14 +803,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const queue = normalizeQueue(queueOverride ?? state.queue);
     const forceReload = Boolean(options?.forceReload);
     const preservePosition = safeNumber(options?.preservePosition, 0);
-
-    console.log("PLAY TRACK CLICKED:", {
-      title: track.title,
-      contentId: track.contentId,
-      token,
-      forceReload,
-      preservePosition,
-    });
 
     desiredPlaying = true;
     hasStartedPlayback = false;
@@ -1015,7 +1017,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (!player) return;
 
     const safeDuration = Math.max(0, Number(duration || 0));
-    const target = Math.max(0, Math.min(Number(seconds || 0), safeDuration || Number(seconds || 0)));
+    const target = Math.max(
+      0,
+      Math.min(Number(seconds || 0), safeDuration || Number(seconds || 0))
+    );
 
     try {
       player.seekTo(target);
@@ -1029,9 +1034,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
 
-      set({
-        position: target,
-      });
+      set({ position: target });
     } catch (error) {
       console.log("Erro ao avançar/recuar para posição:", error);
     }
@@ -1063,26 +1066,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playNext: async () => {
-    const { queue, currentIndex, transitionLock } = get();
+    const { queue, currentIndex, transitionLock, repeatMode } = get();
     if (transitionLock) return;
 
-    const nextIndex = currentIndex + 1;
+    let nextIndex = currentIndex + 1;
 
     if (nextIndex >= queue.length) {
-      desiredPlaying = false;
-      clearTransitionTimeout();
-      clearResumeRetryTimeout();
-      isRecoveringFromStall = false;
-      stallRecoveryAttempts = 0;
+      if (repeatMode === "all" && queue.length > 0) {
+        nextIndex = 0;
+      } else {
+        desiredPlaying = false;
+        clearTransitionTimeout();
+        clearResumeRetryTimeout();
+        isRecoveringFromStall = false;
+        stallRecoveryAttempts = 0;
 
-      deactivateLockScreen(get().player);
+        deactivateLockScreen(get().player);
 
-      set({
-        isPlaying: false,
-        isLoading: false,
-        isBuffering: false,
-      });
-      return;
+        set({
+          isPlaying: false,
+          isLoading: false,
+          isBuffering: false,
+        });
+
+        return;
+      }
     }
 
     desiredPlaying = true;
@@ -1091,8 +1099,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const fresh = get();
       if (fresh.transitionLock) return;
 
-      const safeNextIndex = fresh.currentIndex + 1;
-      if (safeNextIndex >= fresh.queue.length) return;
+      let safeNextIndex = fresh.currentIndex + 1;
+
+      if (safeNextIndex >= fresh.queue.length) {
+        if (fresh.repeatMode === "all" && fresh.queue.length > 0) {
+          safeNextIndex = 0;
+        } else {
+          return;
+        }
+      }
 
       await fresh.playTrack(
         fresh.queue[safeNextIndex],
@@ -1103,8 +1118,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playPrevious: async () => {
-    const { currentIndex, position, transitionLock, player, currentTrack } =
-      get();
+    const {
+      currentIndex,
+      position,
+      transitionLock,
+      player,
+      currentTrack,
+      repeatMode,
+      queue,
+    } = get();
+
     if (transitionLock) return;
 
     if (position > 3 && currentIndex >= 0 && player) {
@@ -1141,8 +1164,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
-    const prevIndex = currentIndex - 1;
-    if (prevIndex < 0) return;
+    let prevIndex = currentIndex - 1;
+
+    if (prevIndex < 0) {
+      if (repeatMode === "all" && queue.length > 0) {
+        prevIndex = queue.length - 1;
+      } else {
+        return;
+      }
+    }
 
     desiredPlaying = true;
 
@@ -1150,8 +1180,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const fresh = get();
       if (fresh.transitionLock) return;
 
-      const safePrevIndex = fresh.currentIndex - 1;
-      if (safePrevIndex < 0) return;
+      let safePrevIndex = fresh.currentIndex - 1;
+
+      if (safePrevIndex < 0) {
+        if (fresh.repeatMode === "all" && fresh.queue.length > 0) {
+          safePrevIndex = fresh.queue.length - 1;
+        } else {
+          return;
+        }
+      }
 
       await fresh.playTrack(
         fresh.queue[safePrevIndex],
@@ -1173,8 +1210,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         get().isBuffering ||
         get().isLoading
       ) {
-        console.log("PAUSE REQUESTED");
-
         desiredPlaying = false;
         clearTransitionTimeout();
         clearResumeRetryTimeout();
@@ -1195,8 +1230,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         return;
       }
-
-      console.log("RESUME REQUESTED");
 
       desiredPlaying = true;
       clearResumeRetryTimeout();
@@ -1226,8 +1259,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   stopAndReset: async () => {
     const player = get().player;
 
-    console.log("STOP AND RESET");
-
     desiredPlaying = false;
     hasStartedPlayback = false;
     clearTransitionTimeout();
@@ -1239,7 +1270,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     lastObservedPosition = 0;
     lastProgressAt = 0;
     lastStatusSignature = "";
-    
 
     deactivateLockScreen(player);
     await safePauseAndRemove(player);
