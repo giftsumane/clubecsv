@@ -83,6 +83,7 @@ let lastMonitorToken = 0;
 let isRecoveringFromStall = false;
 let lastStatusSignature = "";
 let appWasInterrupted = false;
+let hasStartedPlayback = false;
 
 function nextToken() {
   tokenCounter += 1;
@@ -380,6 +381,10 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       status?.isBuffering ?? playerAny.isBuffering ?? false
     );
 
+    if (playing) {
+      hasStartedPlayback = true;
+    }
+
     if (desiredPlaying && !playing && buffering) {
       appWasInterrupted = true;
     }
@@ -387,6 +392,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     if (appWasInterrupted && playing) {
       appWasInterrupted = false;
     }
+    
     const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
     const didJustFinish = Boolean(status?.didJustFinish ?? false);
 
@@ -416,12 +422,13 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     });
 
     const looksLikeExternalPause =
-    desiredPlaying &&
-    isLoaded &&
-    !playing &&
-    !buffering &&
-    !didJustFinish &&
-    currentTime > 0.25;
+      hasStartedPlayback &&
+      desiredPlaying &&
+      isLoaded &&
+      !playing &&
+      !buffering &&
+      !didJustFinish &&
+      currentTime > 0.25;
   
   if (looksLikeExternalPause) {
     console.log("EXTERNAL PAUSE DETECTED");
@@ -796,6 +803,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     });
 
     desiredPlaying = true;
+    hasStartedPlayback = false;
     clearTransitionTimeout();
     clearResumeRetryTimeout();
     stopMonitor();
@@ -1221,6 +1229,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     console.log("STOP AND RESET");
 
     desiredPlaying = false;
+    hasStartedPlayback = false;
     clearTransitionTimeout();
     clearResumeRetryTimeout();
     detachPlaybackListener();
