@@ -1,23 +1,12 @@
+import { useAuthStore } from "@/src/store/authStore";
 import { Redirect } from "expo-router";
-import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
-import { loadAuth } from "../services/auth";
 
 export default function Index() {
-  const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const token = useAuthStore((state) => state.token);
+  const hasHydrated = useAuthStore((state) => state.hasHydrated);
 
-  useEffect(() => {
-    async function checkAuth() {
-      const { token } = await loadAuth();
-      setIsAuthenticated(!!token);
-      setLoading(false);
-    }
-
-    checkAuth();
-  }, []);
-
-  if (loading) {
+  if (!hasHydrated) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator />
@@ -25,8 +14,8 @@ export default function Index() {
     );
   }
 
-  if (isAuthenticated) {
-    return <Redirect href="/(tabs)" />;
+  if (token) {
+    return <Redirect href="/welcome" />;
   }
 
   return <Redirect href="/(auth)/login" />;

@@ -122,7 +122,7 @@ export default function EventDetailScreen() {
             <Text style={styles.placeholderText}>Sem imagem</Text>
           </View>
         )}
-
+        
         <Text style={styles.meta}>
           Club CSV
           {event.created_at ? ` • ${formatDate(event.created_at)}` : ""}
@@ -148,7 +148,7 @@ export default function EventDetailScreen() {
           )}
         </View>
 
-        {!!event.external_url && (
+        {event.external_url && (
           <Pressable style={styles.button} onPress={handleOpenTickets}>
             <Text style={styles.buttonText}>Ver detalhes</Text>
           </Pressable>

@@ -1,17 +1,18 @@
 import { warmUpInitialPlayback } from "@/services/playerWarmup";
 import AppGradient from "@/src/components/AppGradient";
+import { useAuthStore } from "@/src/store/authStore";
 import { usePlayerStore } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Easing,
-    Image,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 export default function WelcomeScreen() {
@@ -24,6 +25,9 @@ export default function WelcomeScreen() {
 
   const [loadingText, setLoadingText] = useState("A carregar conteúdos");
   const warmupStartedRef = useRef(false);
+
+  const token = useAuthStore((state) => state.token);
+  const hasHydrated = useAuthStore((state) => state.hasHydrated);
 
   useEffect(() => {
     Animated.parallel([
@@ -85,9 +89,11 @@ export default function WelcomeScreen() {
 
       try {
         setLoadingText("A preparar conteúdos");
+
         await warmUpInitialPlayback();
 
         const queue = usePlayerStore.getState().queue;
+
         if (queue.length) {
           setLoadingText("A optimizar reprodução");
           usePlayerStore.getState().preloadQueue(queue, 0).catch(() => {});
@@ -104,9 +110,7 @@ export default function WelcomeScreen() {
 
     const textTimer1 = setTimeout(() => {
       setLoadingText((current) =>
-        current === "A carregar conteúdos"
-          ? "A preparar reprodução"
-          : current
+        current === "A carregar conteúdos" ? "A preparar reprodução" : current
       );
     }, 1400);
 
@@ -118,17 +122,33 @@ export default function WelcomeScreen() {
       );
     }, 3200);
 
-    const timer = setTimeout(() => {
-      router.replace("/(tabs)");
-    }, 5500);
-
     return () => {
-      clearTimeout(timer);
       clearTimeout(textTimer1);
       clearTimeout(textTimer2);
       glowLoop.stop();
     };
-  }, [fadeAnim, glowAnim, progressAnim, scaleAnim, subtitleFade, translateAnim]);
+  }, [
+    fadeAnim,
+    glowAnim,
+    progressAnim,
+    scaleAnim,
+    subtitleFade,
+    translateAnim,
+  ]);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    const timer = setTimeout(() => {
+      if (token) {
+        router.replace("/(tabs)");
+      } else {
+        router.replace("/(auth)/login");
+      }
+    }, 5500);
+
+    return () => clearTimeout(timer);
+  }, [hasHydrated, token]);
 
   const progressWidth = progressAnim.interpolate({
     inputRange: [0, 1],
@@ -157,6 +177,7 @@ export default function WelcomeScreen() {
                 },
               ]}
             />
+
             <View style={styles.logoCircle}>
               <Image
                 source={require("@/assets/images/csv-logo.jpg")}

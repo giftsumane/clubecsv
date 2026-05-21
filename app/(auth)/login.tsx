@@ -3,6 +3,7 @@ import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import {
@@ -16,7 +17,6 @@ import {
   View,
 } from "react-native";
 
-
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
   const loading = useAuthStore((state) => state.loading);
@@ -28,8 +28,19 @@ export default function LoginScreen() {
   async function handleLogin() {
     const cleanEmail = email.trim().toLowerCase();
 
+    if (!cleanEmail || !password) {
+      Alert.alert("Atenção", "Preenche o email e a palavra-passe.");
+      return;
+    }
+
     try {
       await login(cleanEmail, password);
+
+      setTimeout(async () => {
+        const saved = await AsyncStorage.getItem("clubcsv-auth");
+        console.log("AUTH GUARDADO NO STORAGE:", saved);
+      }, 500);
+
       router.replace("/welcome");
     } catch (error: any) {
       const data = error?.response?.data;
@@ -60,12 +71,12 @@ export default function LoginScreen() {
               style={styles.logo}
               resizeMode="contain"
             />
-  
+
             <Text style={styles.brand}>BEM VINDO AO CLUBE CSV</Text>
             <Text style={styles.title}>Entrar</Text>
             <Text style={styles.subtitle}>Entrar na tua conta</Text>
           </View>
-  
+
           <View style={styles.form}>
             <TextInput
               placeholder="Email"
@@ -78,7 +89,7 @@ export default function LoginScreen() {
               returnKeyType="next"
               style={styles.input}
             />
-  
+
             <View style={styles.passwordWrapper}>
               <TextInput
                 placeholder="Palavra-passe"
@@ -91,7 +102,7 @@ export default function LoginScreen() {
                 onSubmitEditing={Keyboard.dismiss}
                 style={styles.passwordInput}
               />
-  
+
               <Pressable
                 onPress={() => setShowPassword((prev) => !prev)}
                 style={styles.eyeButton}
@@ -104,7 +115,7 @@ export default function LoginScreen() {
                 />
               </Pressable>
             </View>
-  
+
             <Pressable
               onPress={() => router.push("/(auth)/forgot-password")}
               style={styles.forgotPasswordContainer}
@@ -113,7 +124,7 @@ export default function LoginScreen() {
                 Esqueci-me da palavra-passe
               </Text>
             </Pressable>
-  
+
             <Pressable
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleLogin}
@@ -123,7 +134,7 @@ export default function LoginScreen() {
                 {loading ? "A entrar..." : "Entrar"}
               </Text>
             </Pressable>
-  
+
             <Link href="/(auth)/register" style={styles.link}>
               Ainda não tens conta?{" "}
               <Text style={styles.linkStrong}>Criar conta</Text>

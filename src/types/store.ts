@@ -1,31 +1,46 @@
 export type StoreEvent = {
-    id: number;
-    title: string;
-    description?: string | null;
-    date?: string | null;
-    time?: string | null;
-    location?: string | null;
-    city?: string | null;
-    image_url?: string | null;
-    external_url?: string | null;
-    type: "event";
-  };
-  
-  export type StoreMerch = {
-    id: number;
-    title: string;
-    description?: string | null;
-    price: number;
-    currency?: string | null;
-    image_url?: string | null;
-    category?: string | null;
-    stock?: number | null;
-    external_url?: string | null;
-    is_featured?: boolean;
-    type: "merch";
-  };
-  
-  export type StoreHomeResponse = {
-    events: StoreEvent[];
-    merch: StoreMerch[];
-  };
+  id: number;
+  title: string;
+  description?: string | null;
+  image_url?: string | null;
+  ticket_type?: string | null;
+  price_normal?: number | null;
+  price_vip?: number | null;
+  external_url?: string | null;
+  created_at?: string | null;
+  type?: "event";
+};
+
+export type StoreAlbum = {
+  id: number;
+  title: string;
+  description?: string | null;
+  cover_url?: string | null;
+  image_url?: string | null;
+  artist_name?: string | null;
+  price?: number | null;
+  external_url?: string | null;
+  release_date?: string | null;
+  created_at?: string | null;
+  type?: "album";
+};
+
+export type StoreMerch = {
+  id: number;
+  title: string;
+  description?: string | null;
+  image_url?: string | null;
+  category?: string | null;
+  stock?: number | null;
+  price: number;
+  currency?: string | null;
+  external_url?: string | null;
+  created_at?: string | null;
+  type?: "merch";
+};
+
+export type StoreHomeResponse = {
+  events: StoreEvent[];
+  albums: StoreAlbum[];
+  merch: StoreMerch[];
+};

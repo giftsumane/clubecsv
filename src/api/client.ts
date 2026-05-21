@@ -1,26 +1,33 @@
-import axios from 'axios';
-import { useAuthStore } from '../store/authStore';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
 
 export const api = axios.create({
-  //baseURL: 'http://192.168.100.168:8000/api',// base internet casa
-  //baseURL: 'http://192.168.18.140:8000/api',// base internet office
-  baseURL: 'https://bilhetes.csveventos.co.mz/api', //base de dados online
-  timeout: 15000,
+  baseURL: "https://bilhetes.csveventos.co.mz/api",
+  timeout: 30000,
   headers: {
-    Accept: 'application/json',
-    'Content-Type': 'application/json',
+    Accept: "application/json",
+    "Content-Type": "application/json",
   },
 });
 
-api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token;
+api.interceptors.request.use(
+  async (config) => {
+    try {
+      const rawAuth = await AsyncStorage.getItem("clubcsv-auth");
 
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+      if (rawAuth) {
+        const parsed = JSON.parse(rawAuth);
+        const token = parsed?.state?.token;
 
-  console.log('API REQUEST:', config.method?.toUpperCase(), `${config.baseURL}${config.url}`);
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+      }
+    } catch (error) {
+      console.log("Erro ao ler token do AsyncStorage:", error);
+    }
 
-  return config;
-});
-
+    return config;
+  },
+  (error) => Promise.reject(error)
+);

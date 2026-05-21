@@ -1,6 +1,5 @@
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
-import HomeBanner from "@/src/components/HomeBanner";
 import { colors } from "@/src/theme/colors";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -101,10 +100,10 @@ export default function HomeScreen() {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        <HomeBanner
+    {/*  <HomeBanner
         title="Novo álbum disponível"
         subtitle="Escuta agora conteúdos exclusivos no Clube CSV."
-      />
+      /> */}
       
         <Text style={styles.kicker}>Clube CSV</Text>
         <Text style={styles.heading}>Notícia em destaque</Text>

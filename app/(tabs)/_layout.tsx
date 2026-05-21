@@ -1,8 +1,19 @@
+import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 
 export default function TabsLayout() {
+  const { token, hasHydrated } = useAuthStore();
+
+  if (!hasHydrated) {
+    return null;
+  }
+
+  if (!token) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
   return (
     <Tabs
       screenOptions={({ route }) => ({
@@ -48,14 +59,12 @@ export default function TabsLayout() {
         },
 
         tabBarIcon: ({ color, focused }) => {
-          let iconName: any;
+          let iconName: any = "ellipse-outline";
 
           if (route.name === "index") {
             iconName = focused ? "home" : "home-outline";
           } else if (route.name === "library") {
-            iconName = focused
-              ? "musical-notes"
-              : "musical-notes-outline";
+            iconName = focused ? "musical-notes" : "musical-notes-outline";
           } else if (route.name === "store") {
             iconName = focused ? "bag" : "bag-outline";
           } else if (route.name === "news") {

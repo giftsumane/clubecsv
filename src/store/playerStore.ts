@@ -374,29 +374,24 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       status?.currentTime ?? playerAny.currentTime,
       0
     );
+
     const totalDuration = safeNumber(
       status?.duration ?? playerAny.duration,
       0
     );
+
     const playing = Boolean(status?.playing ?? playerAny.playing ?? false);
+
     const buffering = Boolean(
       status?.isBuffering ?? playerAny.isBuffering ?? false
     );
 
+    const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
+    const didJustFinish = Boolean(status?.didJustFinish ?? false);
+
     if (playing) {
       hasStartedPlayback = true;
     }
-
-    if (desiredPlaying && !playing && buffering) {
-      appWasInterrupted = true;
-    }
-    
-    if (appWasInterrupted && playing) {
-      appWasInterrupted = false;
-    }
-    
-    const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
-    const didJustFinish = Boolean(status?.didJustFinish ?? false);
 
     maybeLogStatus({
       token,
@@ -423,30 +418,34 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       isPlaying: desiredPlaying && isLoaded && playing,
     });
 
-    const looksLikeExternalPause =
-      hasStartedPlayback &&
+    if (
       desiredPlaying &&
       isLoaded &&
       !playing &&
       !buffering &&
       !didJustFinish &&
-      currentTime > 0.25;
-  
-  if (looksLikeExternalPause) {
-    console.log("EXTERNAL PAUSE DETECTED");
-  
-    desiredPlaying = false;
+      currentTime <= 0.25
+    ) {
+      clearResumeRetryTimeout();
+    
+      resumeRetryTimeout = setTimeout(() => {
+        const fresh = usePlayerStore.getState();
+    
+        if (fresh.playbackToken !== token) return;
+        if (!desiredPlaying || !fresh.player) return;
+    
+        try {
+          console.log("FORCE START PLAY RETRY");
+          fresh.player.play();
+        } catch (error) {
+          console.log("Erro no retry inicial do play:", error);
+        }
+      }, 250);
+    
+      return;
+    }
+
     clearResumeRetryTimeout();
-    stopMonitor();
-  
-    usePlayerStore.setState({
-      isPlaying: false,
-      isLoading: false,
-      isBuffering: false,
-    });
-  } else {
-    clearResumeRetryTimeout();
-  }
 
     const freshState = usePlayerStore.getState();
     const nextTrack = freshState.queue[freshState.currentIndex + 1];
@@ -461,8 +460,11 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       resolveTrackUrl(nextTrack, freshState.urlCache)
         .then((nextUrl) => {
           rememberTrackUrlInState(nextTrack.contentId, nextUrl);
+
           if (nextUrl.startsWith("file://")) {
-            freshState.markOfflineAvailable(nextTrack.contentId, true);
+            usePlayerStore
+              .getState()
+              .markOfflineAvailable(nextTrack.contentId, true);
           }
         })
         .catch(() => {
@@ -473,26 +475,67 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     if (didJustFinish) {
       clearResumeRetryTimeout();
       clearTransitionTimeout();
+
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
 
       const latestState = usePlayerStore.getState();
-      const queuedNextTrack = latestState.queue[latestState.currentIndex + 1];
+
+      if (latestState.repeatMode === "one" && latestState.currentTrack) {
+        transitionTimeout = setTimeout(() => {
+          enqueueSwitch(async () => {
+            const fresh = usePlayerStore.getState();
+
+            if (!fresh.currentTrack) return;
+
+            desiredPlaying = true;
+
+            await fresh.playTrack(
+              fresh.currentTrack,
+              fresh.queue,
+              fresh.currentIndex,
+              { forceReload: true }
+            );
+          });
+        }, 120);
+
+        return;
+      }
+
+      const queuedNextIndex =
+        latestState.currentIndex + 1 >= latestState.queue.length
+          ? latestState.repeatMode === "all"
+            ? 0
+            : -1
+          : latestState.currentIndex + 1;
+
+      const queuedNextTrack =
+        queuedNextIndex >= 0 ? latestState.queue[queuedNextIndex] : null;
 
       if (queuedNextTrack && desiredPlaying) {
         transitionTimeout = setTimeout(() => {
           enqueueSwitch(async () => {
             const newestState = usePlayerStore.getState();
+
             if (!desiredPlaying) return;
 
-            const autoNextTrack =
-              newestState.queue[newestState.currentIndex + 1];
+            const nextIndex =
+              newestState.currentIndex + 1 >= newestState.queue.length
+                ? newestState.repeatMode === "all"
+                  ? 0
+                  : -1
+                : newestState.currentIndex + 1;
+
+            if (nextIndex < 0) return;
+
+            const autoNextTrack = newestState.queue[nextIndex];
+
             if (!autoNextTrack) return;
 
             await newestState.playTrack(
               autoNextTrack,
               newestState.queue,
-              newestState.currentIndex + 1
+              nextIndex
             );
           });
         }, 120);
@@ -523,6 +566,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
   if (typeof playerAny.onPlaybackStatusUpdate === "function") {
     playerAny.onPlaybackStatusUpdate(handler);
+
     playbackSubscription = {
       remove: () => {
         try {
@@ -530,6 +574,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
         } catch {}
       },
     };
+
     return;
   }
 
@@ -1202,54 +1247,53 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const player = get().player;
     const currentTrack = get().currentTrack;
     if (!player) return;
-
+  
     try {
-      if (
-        desiredPlaying ||
-        get().isPlaying ||
-        get().isBuffering ||
-        get().isLoading
-      ) {
+      if (get().isLoading && !get().isPlaying) {
+        return;
+      }
+  
+      if (desiredPlaying || get().isPlaying || get().isBuffering) {
         desiredPlaying = false;
         clearTransitionTimeout();
         clearResumeRetryTimeout();
         isRecoveringFromStall = false;
         stopMonitor();
-
+  
         try {
           player.pause();
         } catch {}
-
+  
         deactivateLockScreen(player);
-
+  
         set({
           isPlaying: false,
           isBuffering: false,
           isLoading: false,
         });
-
+  
         return;
       }
-
+  
       desiredPlaying = true;
       clearResumeRetryTimeout();
-
+  
       if (currentTrack) {
         activateLockScreen(player, currentTrack);
       }
-
+  
       player.play();
-
+  
       lastProgressAt = Date.now();
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
-
+  
       set({
         isLoading: true,
         isBuffering: false,
         isPlaying: false,
       });
-
+  
       startMonitor(get().playbackToken);
     } catch (error) {
       console.log("Erro ao alternar play/pause:", error);
