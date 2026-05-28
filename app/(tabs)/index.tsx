@@ -124,18 +124,18 @@ export default function HomeScreen() {
     await fetchHome();
   }
 
-  async function handleNewsPress(item: NewsItem) {
-    if (item.link) {
-      try {
-        await WebBrowser.openBrowserAsync(item.link);
-      } catch (error) {
-        console.log("Erro ao abrir link da notícia:", error);
-      }
-
-      return;
-    }
-
+  function handleNewsPress(item: NewsItem) {
     router.push(`/news/${item.id}`);
+  }
+  
+  async function handleOpenLink(link?: string | null) {
+    if (!link) return;
+  
+    try {
+      await WebBrowser.openBrowserAsync(link);
+    } catch (error) {
+      console.log("Erro ao abrir link da notícia:", error);
+    }
   }
 
   if (loading && !featuredNews && news.length === 0) {
@@ -206,9 +206,20 @@ export default function HomeScreen() {
                   "Sem descrição disponível."}
               </Text>
 
-              <Text style={styles.linkHint}>
-                {featuredNews.link ? "Abrir link" : "Ler notícia"}
-              </Text>
+              <View style={styles.actionsRow}>
+                <Text style={styles.linkHint}>Ler notícia</Text>
+
+                {featuredNews.link ? (
+                  <Pressable
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      handleOpenLink(featuredNews.link);
+                    }}
+                  >
+                    <Text style={styles.externalActionText}>Abrir link externo</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </Pressable>
         ) : (
@@ -445,5 +456,17 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     color: colors.textMuted,
+  },
+  actionsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  externalActionText: {
+    color: colors.secondary,
+    fontSize: 12,
+    fontWeight: "800",
   },
 });

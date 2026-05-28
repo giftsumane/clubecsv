@@ -5,14 +5,14 @@ import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 type NewsItem = {
@@ -80,17 +80,18 @@ export default function NewsScreen() {
     }
   };
 
-  const handleNewsPress = async (item: NewsItem) => {
-    if (item.link) {
-      try {
-        await WebBrowser.openBrowserAsync(item.link);
-      } catch (error) {
-        console.log("Erro ao abrir link da notícia:", error);
-      }
-      return;
-    }
-
+  const handleNewsPress = (item: NewsItem) => {
     router.push(`/news/${item.id}`);
+  };
+  
+  const handleOpenLink = async (link?: string | null) => {
+    if (!link) return;
+  
+    try {
+      await WebBrowser.openBrowserAsync(link);
+    } catch (error) {
+      console.log("Erro ao abrir link da notícia:", error);
+    }
   };
 
   if (loading) {
@@ -152,9 +153,20 @@ export default function NewsScreen() {
                   {item.summary || item.body || "Sem descrição disponível."}
                 </Text>
 
-                <Text style={styles.actionText}>
-                  {item.link ? "Abrir link" : "Ler notícia"}
-                </Text>
+                <View style={styles.actionsRow}>
+                  <Text style={styles.actionText}>Ler notícia</Text>
+
+                  {item.link ? (
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        handleOpenLink(item.link);
+                      }}
+                    >
+                      <Text style={styles.externalActionText}>Abrir link externo</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
             </Pressable>
           )}
@@ -256,5 +268,17 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: colors.textMuted,
     fontSize: 14,
+  },
+  actionsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  externalActionText: {
+    color: colors.secondary,
+    fontSize: 12,
+    fontWeight: "800",
   },
 });

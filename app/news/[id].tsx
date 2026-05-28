@@ -3,6 +3,7 @@ import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,10 +23,12 @@ type NewsDetail = {
   image_url?: string | null;
   artist_name?: string | null;
   published_at?: string | null;
+  link?: string | null;
 };
 
 function formatDate(date?: string | null) {
   if (!date) return "";
+
   try {
     return new Date(date).toLocaleDateString("pt-PT", {
       day: "2-digit",
@@ -39,6 +42,7 @@ function formatDate(date?: string | null) {
 
 export default function NewsDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+
   const [news, setNews] = useState<NewsDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -46,7 +50,9 @@ export default function NewsDetailScreen() {
     const fetchNewsDetail = async () => {
       try {
         setLoading(true);
+
         const { data } = await api.get<NewsDetail>(`/news/${id}`);
+
         setNews(data || null);
       } catch (error) {
         console.log("Erro ao carregar detalhe da notícia:", error);
@@ -61,6 +67,16 @@ export default function NewsDetailScreen() {
     }
   }, [id]);
 
+  async function handleOpenLink() {
+    if (!news?.link) return;
+
+    try {
+      await WebBrowser.openBrowserAsync(news.link);
+    } catch (error) {
+      console.log("Erro ao abrir link da notícia:", error);
+    }
+  }
+
   if (loading) {
     return (
       <AppGradient>
@@ -68,7 +84,9 @@ export default function NewsDetailScreen() {
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color={colors.white} />
           </Pressable>
+
           <ActivityIndicator color={colors.yellow} />
+
           <Text style={styles.helper}>A carregar notícia...</Text>
         </View>
       </AppGradient>
@@ -82,6 +100,7 @@ export default function NewsDetailScreen() {
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color={colors.white} />
           </Pressable>
+
           <Text style={styles.emptyTitle}>Notícia não encontrada.</Text>
         </View>
       </AppGradient>
@@ -118,6 +137,20 @@ export default function NewsDetailScreen() {
           <Text style={styles.summary}>{news.summary}</Text>
         ) : null}
 
+        {news.link ? (
+          <Pressable style={styles.linkButton} onPress={handleOpenLink}>
+            <Ionicons
+              name="open-outline"
+              size={18}
+              color={colors.white}
+            />
+
+            <Text style={styles.linkButtonText}>
+              Abrir link externo
+            </Text>
+          </Pressable>
+        ) : null}
+
         <View style={styles.bodyWrapper}>
           <Text style={styles.body}>
             {news.body || "Sem conteúdo disponível para esta notícia."}
@@ -133,17 +166,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "transparent",
   },
+
   contentContainer: {
     paddingTop: 20,
     paddingHorizontal: 16,
     paddingBottom: 140,
   },
+
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
   },
+
   backBtn: {
     width: 42,
     height: 42,
@@ -155,17 +191,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 16,
   },
+
   helper: {
     marginTop: 10,
     color: colors.textMuted,
     fontSize: 14,
   },
+
   emptyTitle: {
     color: colors.white,
     fontSize: 22,
     fontWeight: "800",
     textAlign: "center",
   },
+
   image: {
     width: "100%",
     height: 320,
@@ -173,37 +212,62 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
     marginBottom: 18,
   },
+
   placeholder: {
     alignItems: "center",
     justifyContent: "center",
   },
+
   placeholderText: {
     color: colors.textMuted,
   },
+
   meta: {
     color: colors.yellow,
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 10,
   },
+
   title: {
     color: colors.white,
     fontSize: 28,
     fontWeight: "800",
     lineHeight: 34,
   },
+
   summary: {
     marginTop: 14,
     color: colors.textMuted,
     fontSize: 16,
     lineHeight: 24,
   },
+
+  linkButton: {
+    marginTop: 18,
+    backgroundColor: colors.secondary,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+
+  linkButtonText: {
+    color: colors.white,
+    fontWeight: "800",
+    fontSize: 15,
+  },
+
   bodyWrapper: {
     marginTop: 22,
     paddingTop: 18,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.08)",
   },
+
   body: {
     color: colors.white,
     fontSize: 15,
