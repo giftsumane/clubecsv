@@ -3,7 +3,6 @@ import DismissKeyboardView from "@/src/components/DismissKeyboardView";
 import { useAuthStore } from "@/src/store/authStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import {
@@ -35,12 +34,6 @@ export default function LoginScreen() {
 
     try {
       await login(cleanEmail, password);
-
-      setTimeout(async () => {
-        const saved = await AsyncStorage.getItem("clubcsv-auth");
-        console.log("AUTH GUARDADO NO STORAGE:", saved);
-      }, 500);
-
       router.replace("/welcome");
     } catch (error: any) {
       const data = error?.response?.data;

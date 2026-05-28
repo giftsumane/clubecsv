@@ -1,8 +1,8 @@
 import AppGradient from "@/src/components/AppGradient";
 import { useLibraryStore } from "@/src/store/libraryStore";
 import { colors } from "@/src/theme/colors";
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo } from "react";
+import { router } from "expo-router";
+import { useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -37,13 +37,7 @@ export default function LibraryScreen() {
   const loading = useLibraryStore((state) => state.loading);
   const fetchLibrary = useLibraryStore((state) => state.fetchLibrary);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchLibrary().catch((error) => {
-        console.log("Erro ao carregar library:", error);
-      });
-    }, [fetchLibrary])
-  );
+  const didFetchRef = useRef(false);
 
   const data = useMemo<LibraryItem[]>(() => {
     const albumItems: LibraryAlbumItem[] = (albums || []).map((album) => ({
@@ -65,7 +59,19 @@ export default function LibraryScreen() {
     return [...albumItems, ...musicItems];
   }, [albums, musics]);
 
-  if (loading) {
+  useEffect(() => {
+    if (didFetchRef.current) return;
+
+    didFetchRef.current = true;
+
+    fetchLibrary().catch((error) => {
+      console.log("Erro ao carregar library:", error);
+    });
+  }, [fetchLibrary]);
+
+  const showFullLoader = loading && data.length === 0;
+
+  if (showFullLoader) {
     return (
       <AppGradient>
         <View style={styles.center}>
@@ -78,7 +84,13 @@ export default function LibraryScreen() {
   return (
     <AppGradient>
       <View style={styles.screen}>
-        <Text style={styles.header}>Biblioteca</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.header}>Biblioteca</Text>
+
+          {loading && data.length > 0 ? (
+            <ActivityIndicator color={colors.white} size="small" />
+          ) : null}
+        </View>
 
         <FlatList
           data={data}
@@ -92,7 +104,8 @@ export default function LibraryScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <Text style={styles.emptyText}>
-              Ainda não tens conteúdos comprados. Adquire músicas ou álbuns em www.csveventos.co.mz.
+              Ainda não tens conteúdos comprados. Adquire músicas ou álbuns em
+              www.csveventos.co.mz.
             </Text>
           }
           renderItem={({ item }) => (
@@ -135,6 +148,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: 56,
   },
+  headerRow: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   container: {
     paddingHorizontal: 16,
     paddingTop: 12,
@@ -144,8 +164,6 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 30,
     fontWeight: "800",
-    paddingHorizontal: 16,
-    marginBottom: 12,
     color: colors.white,
   },
   emptyContainer: {

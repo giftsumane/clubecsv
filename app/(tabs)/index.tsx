@@ -1,6 +1,7 @@
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import React, { useEffect, useState } from "react";
@@ -8,11 +9,14 @@ import {
   ActivityIndicator,
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+
+const HOME_CACHE_KEY = "clubcsv-home-cache-v1";
 
 type NewsItem = {
   id: number;
@@ -32,6 +36,7 @@ type HomeResponse = {
 
 function formatDate(date?: string | null) {
   if (!date) return "";
+
   try {
     return new Date(date).toLocaleDateString("pt-PT", {
       day: "2-digit",
@@ -47,46 +52,98 @@ export default function HomeScreen() {
   const [featuredNews, setFeaturedNews] = useState<NewsItem | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isOfflineCache, setIsOfflineCache] = useState(false);
 
   useEffect(() => {
     fetchHome();
   }, []);
 
-  const fetchHome = async () => {
+  async function loadCachedHome() {
+    try {
+      const cached = await AsyncStorage.getItem(HOME_CACHE_KEY);
+
+      if (!cached) return false;
+
+      const parsed: HomeResponse = JSON.parse(cached);
+
+      setFeaturedNews(parsed.featured || null);
+      setNews(Array.isArray(parsed.news) ? parsed.news : []);
+      setIsOfflineCache(true);
+
+      return true;
+    } catch (error) {
+      console.log("Erro ao carregar cache da home:", error);
+      return false;
+    }
+  }
+
+  async function saveHomeCache(data: HomeResponse) {
+    try {
+      await AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(data));
+    } catch (error) {
+      console.log("Erro ao guardar cache da home:", error);
+    }
+  }
+
+  async function fetchHome() {
     try {
       setLoading(true);
 
+      const hadCache = await loadCachedHome();
+
       const { data } = await api.get<HomeResponse>("/home");
 
-      setFeaturedNews(data?.featured || null);
-      setNews(Array.isArray(data?.news) ? data.news : []);
+      const payload: HomeResponse = {
+        featured: data?.featured || null,
+        news: Array.isArray(data?.news) ? data.news : [],
+      };
+
+      setFeaturedNews(payload.featured || null);
+      setNews(payload.news || []);
+      setIsOfflineCache(false);
+
+      await saveHomeCache(payload);
     } catch (error) {
-      console.log("Erro ao carregar home", error);
-      setFeaturedNews(null);
-      setNews([]);
+      console.log("Erro ao carregar home. A usar cache local:", error);
+
+      await loadCachedHome();
+
+      // Importante:
+      // Não fazer setFeaturedNews(null)
+      // Não fazer setNews([])
+      // Assim, os dados antigos continuam visíveis offline.
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }
 
-  const handleNewsPress = async (item: NewsItem) => {
+  async function handleRefresh() {
+    setRefreshing(true);
+    await fetchHome();
+  }
+
+  async function handleNewsPress(item: NewsItem) {
     if (item.link) {
       try {
         await WebBrowser.openBrowserAsync(item.link);
       } catch (error) {
         console.log("Erro ao abrir link da notícia:", error);
       }
+
       return;
     }
 
     router.push(`/news/${item.id}`);
-  };
+  }
 
-  if (loading) {
+  if (loading && !featuredNews && news.length === 0) {
     return (
       <AppGradient>
         <View style={styles.center}>
           <ActivityIndicator color={colors.yellow} />
+          <Text style={styles.loadingText}>A carregar conteúdos...</Text>
         </View>
       </AppGradient>
     );
@@ -94,19 +151,28 @@ export default function HomeScreen() {
 
   return (
     <AppGradient>
-      
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.yellow}
+          />
+        }
       >
-    {/*  <HomeBanner
-        title="Novo álbum disponível"
-        subtitle="Escuta agora conteúdos exclusivos no Clube CSV."
-      /> */}
-      
         <Text style={styles.kicker}>Clube CSV</Text>
         <Text style={styles.heading}>Notícia em destaque</Text>
+
+        {isOfflineCache ? (
+          <View style={styles.offlineNotice}>
+            <Text style={styles.offlineNoticeText}>
+              Modo offline: a mostrar dados guardados.
+            </Text>
+          </View>
+        ) : null}
 
         {featuredNews ? (
           <Pressable
@@ -140,11 +206,9 @@ export default function HomeScreen() {
                   "Sem descrição disponível."}
               </Text>
 
-              {featuredNews.link ? (
-                <Text style={styles.linkHint}>Abrir link</Text>
-              ) : (
-                <Text style={styles.linkHint}>Ler notícia</Text>
-              )}
+              <Text style={styles.linkHint}>
+                {featuredNews.link ? "Abrir link" : "Ler notícia"}
+              </Text>
             </View>
           </Pressable>
         ) : (
@@ -166,7 +230,10 @@ export default function HomeScreen() {
                 onPress={() => handleNewsPress(item)}
               >
                 {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.newsImage} />
+                  <Image
+                    source={{ uri: item.image_url }}
+                    style={styles.newsImage}
+                  />
                 ) : (
                   <View style={[styles.newsImage, styles.placeholder]}>
                     <Text style={styles.placeholderText}>Sem imagem</Text>
@@ -176,7 +243,9 @@ export default function HomeScreen() {
                 <View style={styles.newsContent}>
                   <Text style={styles.newsMeta}>
                     {item.artist_name || "Club CSV"}
-                    {item.published_at ? ` • ${formatDate(item.published_at)}` : ""}
+                    {item.published_at
+                      ? ` • ${formatDate(item.published_at)}`
+                      : ""}
                   </Text>
 
                   <Text style={styles.newsTitle} numberOfLines={2}>
@@ -197,11 +266,14 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>Tudo sobre o teu artista, num só lugar</Text>
+          <Text style={styles.infoTitle}>
+            Tudo sobre o teu artista, num só lugar
+          </Text>
+
           <Text style={styles.infoText}>
             O Club CSV foi pensado para aproximar os fãs dos seus artistas
-            favoritos, com acesso centralizado a notícias, conteúdos, biblioteca
-            e bilhetes.
+            favoritos, com acesso centralizado a notícias, conteúdos,
+            biblioteca e bilhetes.
           </Text>
         </View>
       </ScrollView>
@@ -235,6 +307,20 @@ const styles = StyleSheet.create({
   },
   sectionSpacing: {
     marginTop: 28,
+  },
+  offlineNotice: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    marginBottom: 14,
+  },
+  offlineNoticeText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
   },
   featuredCard: {
     borderRadius: 24,
@@ -343,6 +429,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  loadingText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginTop: 10,
   },
   emptyText: {
     color: colors.textMuted,

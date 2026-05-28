@@ -30,39 +30,41 @@ export default function WelcomeScreen() {
   const hasHydrated = useAuthStore((state) => state.hasHydrated);
 
   useEffect(() => {
-    Animated.parallel([
+    const animations = Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 900,
+        duration: 700,
         easing: Easing.out(Easing.ease),
         useNativeDriver: true,
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
-        duration: 1100,
+        duration: 850,
         easing: Easing.out(Easing.back(1.15)),
         useNativeDriver: true,
       }),
       Animated.timing(translateAnim, {
         toValue: 0,
-        duration: 900,
+        duration: 700,
         easing: Easing.out(Easing.ease),
         useNativeDriver: true,
       }),
       Animated.timing(subtitleFade, {
         toValue: 1,
-        duration: 1200,
-        delay: 300,
+        duration: 850,
+        delay: 180,
         easing: Easing.out(Easing.ease),
         useNativeDriver: true,
       }),
       Animated.timing(progressAnim, {
         toValue: 1,
-        duration: 5200,
+        duration: 2200,
         easing: Easing.inOut(Easing.ease),
         useNativeDriver: false,
       }),
-    ]).start();
+    ]);
+
+    animations.start();
 
     const glowLoop = Animated.loop(
       Animated.sequence([
@@ -83,48 +85,7 @@ export default function WelcomeScreen() {
 
     glowLoop.start();
 
-    const boot = async () => {
-      if (warmupStartedRef.current) return;
-      warmupStartedRef.current = true;
-
-      try {
-        setLoadingText("A preparar conteúdos");
-
-        await warmUpInitialPlayback();
-
-        const queue = usePlayerStore.getState().queue;
-
-        if (queue.length) {
-          setLoadingText("A optimizar reprodução");
-          usePlayerStore.getState().preloadQueue(queue, 0).catch(() => {});
-        }
-
-        setLoadingText("Quase pronto");
-      } catch (error) {
-        console.log("Warmup no welcome falhou:", error);
-        setLoadingText("A iniciar aplicação");
-      }
-    };
-
-    boot();
-
-    const textTimer1 = setTimeout(() => {
-      setLoadingText((current) =>
-        current === "A carregar conteúdos" ? "A preparar reprodução" : current
-      );
-    }, 1400);
-
-    const textTimer2 = setTimeout(() => {
-      setLoadingText((current) =>
-        current === "A preparar reprodução"
-          ? "A optimizar experiência"
-          : current
-      );
-    }, 3200);
-
     return () => {
-      clearTimeout(textTimer1);
-      clearTimeout(textTimer2);
       glowLoop.stop();
     };
   }, [
@@ -139,15 +100,49 @@ export default function WelcomeScreen() {
   useEffect(() => {
     if (!hasHydrated) return;
 
-    const timer = setTimeout(() => {
-      if (token) {
-        router.replace("/(tabs)");
-      } else {
-        router.replace("/(auth)/login");
-      }
-    }, 5500);
+    if (!token) {
+      router.replace("/(auth)/login");
+      return;
+    }
 
-    return () => clearTimeout(timer);
+    let cancelled = false;
+
+    async function boot() {
+      if (warmupStartedRef.current) return;
+      warmupStartedRef.current = true;
+
+      try {
+        setLoadingText("A preparar conteúdos");
+
+        await warmUpInitialPlayback();
+
+        if (cancelled) return;
+
+        const queue = usePlayerStore.getState().queue;
+
+        if (queue.length) {
+          setLoadingText("A optimizar reprodução");
+          usePlayerStore.getState().preloadQueue(queue, 0).catch(() => {});
+        }
+
+        setLoadingText("Quase pronto");
+      } catch (error) {
+        console.log("Warmup no welcome falhou:", error);
+        setLoadingText("A iniciar aplicação");
+      } finally {
+        setTimeout(() => {
+          if (!cancelled) {
+            router.replace("/(tabs)");
+          }
+        }, 700);
+      }
+    }
+
+    boot();
+
+    return () => {
+      cancelled = true;
+    };
   }, [hasHydrated, token]);
 
   const progressWidth = progressAnim.interpolate({

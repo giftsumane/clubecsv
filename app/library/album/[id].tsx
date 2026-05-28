@@ -1,5 +1,6 @@
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
+import { useLibraryStore } from "@/src/store/libraryStore";
 import { usePlayerStore, type Track } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
@@ -67,31 +68,56 @@ export default function LibraryAlbumDetailScreen() {
 
   const coverHeight = Math.max(140, Math.min(190, height * 0.23));
 
+  const saveAlbumDetail = useLibraryStore((state) => state.saveAlbumDetail);
+  const getAlbumDetail = useLibraryStore((state) => state.getAlbumDetail);
+
   useEffect(() => {
     let mounted = true;
-
+  
     async function loadAlbum() {
+      const albumId = Number(id);
+  
+      if (!albumId) {
+        setLoading(false);
+        return;
+      }
+  
+      const cachedAlbum = getAlbumDetail(albumId);
+  
+      if (cachedAlbum && mounted) {
+        setAlbum(cachedAlbum);
+      }
+  
       try {
-        setLoading(true);
-        const res = await api.get(`/albums/${id}`);
+        setLoading(!cachedAlbum);
+  
+        const res = await api.get(`/albums/${albumId}`);
         const payload = res.data?.album || res.data;
-
-        if (mounted) {
-          setAlbum(payload);
+  
+        if (payload?.id) {
+          saveAlbumDetail(payload);
+  
+          if (mounted) {
+            setAlbum(payload);
+          }
         }
       } catch (error) {
-        console.log("Erro ao carregar álbum da library:", error);
+        console.log("Erro ao carregar álbum. A usar cache local:", error);
+  
+        if (!cachedAlbum && mounted) {
+          setAlbum(null);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
     }
-
-    if (id) loadAlbum();
-
+  
+    loadAlbum();
+  
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, getAlbumDetail, saveAlbumDetail]);
 
   const queue = useMemo<Track[]>(() => {
     return contents.map((item) => ({
