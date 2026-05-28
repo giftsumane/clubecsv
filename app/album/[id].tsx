@@ -2,6 +2,7 @@ import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import MusicCard from "@/src/components/MusicCard";
 import PurchaseButton from "@/src/components/PurchaseButton";
+import { useLibraryStore } from "@/src/store/libraryStore";
 import { usePlayerStore, type Track } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import type { Album } from "@/src/types";
@@ -24,6 +25,9 @@ export default function AlbumDetailScreen() {
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const saveAlbumDetail = useLibraryStore((state) => state.saveAlbumDetail);
+  const getAlbumDetail = useLibraryStore((state) => state.getAlbumDetail);
+
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
   const preloadQueue = usePlayerStore((state) => state.preloadQueue);
   const currentTrack = usePlayerStore((state) => state.currentTrack);
@@ -43,29 +47,54 @@ export default function AlbumDetailScreen() {
   useEffect(() => {
     let mounted = true;
 
-    const fetchAlbum = async () => {
-      try {
-        setLoading(true);
-        const { data } = await api.get(`/albums/${id}`);
+    async function fetchAlbum() {
+      const albumId = Number(id);
 
-        if (mounted) {
-          setAlbum(data?.album || data);
+      if (!albumId) {
+        setLoading(false);
+        return;
+      }
+
+      const cachedAlbum = getAlbumDetail(albumId);
+
+      if (cachedAlbum && mounted) {
+        setAlbum(cachedAlbum);
+      }
+
+      try {
+        setLoading(!cachedAlbum);
+
+        const { data } = await api.get(`/albums/${albumId}`);
+        const payload = data?.album || data;
+
+        if (payload?.id) {
+          await saveAlbumDetail(payload);
+
+          const freshCachedAlbum = getAlbumDetail(albumId);
+
+          if (mounted) {
+            setAlbum(freshCachedAlbum || payload);
+          }
         }
       } catch (error) {
-        console.log("Erro ao carregar álbum:", error);
+        console.log("Erro ao carregar álbum. A usar cache local:", error);
+
+        if (!cachedAlbum && mounted) {
+          setAlbum(null);
+        }
       } finally {
         if (mounted) {
           setLoading(false);
         }
       }
-    };
+    }
 
-    if (id) fetchAlbum();
+    fetchAlbum();
 
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, getAlbumDetail, saveAlbumDetail]);
 
   const tracks = album?.tracks || album?.contents || [];
 
@@ -95,6 +124,7 @@ export default function AlbumDetailScreen() {
   const offlineCount = queue.filter((item) =>
     isTrackOffline(item.contentId)
   ).length;
+
   const allOffline = queue.length > 0 && offlineCount === queue.length;
 
   const handleDownloadAlbum = async () => {
@@ -131,13 +161,14 @@ export default function AlbumDetailScreen() {
     }
   };
 
-  if (loading) {
+  if (loading && !album) {
     return (
       <AppGradient>
         <View style={styles.center}>
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color={colors.white} />
           </Pressable>
+
           <ActivityIndicator color={colors.yellow} />
           <Text style={styles.helperText}>A carregar álbum...</Text>
         </View>
@@ -152,6 +183,7 @@ export default function AlbumDetailScreen() {
           <Pressable style={styles.backBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color={colors.white} />
           </Pressable>
+
           <Text style={styles.emptyTitle}>Álbum não encontrado.</Text>
         </View>
       </AppGradient>
@@ -205,6 +237,7 @@ export default function AlbumDetailScreen() {
             size={20}
             color={colors.white}
           />
+
           <Text style={styles.offlineButtonText}>
             {isDownloading
               ? "A descarregar..."
@@ -226,10 +259,16 @@ export default function AlbumDetailScreen() {
             return (
               <View
                 key={track.id}
-                style={[styles.trackWrapper, active && styles.trackWrapperActive]}
+                style={[
+                  styles.trackWrapper,
+                  active && styles.trackWrapperActive,
+                ]}
               >
                 <MusicCard
-                  music={track}
+                  music={{
+                    ...track,
+                    cover_url: track.cover_url ?? album.cover_url,
+                  }}
                   onPress={() => handleTrackPress(track)}
                 />
 
