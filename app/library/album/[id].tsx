@@ -55,7 +55,6 @@ export default function LibraryAlbumDetailScreen() {
   const isDownloading = usePlayerStore((state) => state.isDownloading);
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
-  const preloadQueue = usePlayerStore((state) => state.preloadQueue);
   const downloadAlbumOffline = usePlayerStore(
     (state) => state.downloadAlbumOffline
   );
@@ -133,14 +132,10 @@ export default function LibraryAlbumDetailScreen() {
   useEffect(() => {
     if (!queue.length) return;
 
-    preloadQueue(queue).catch((error) => {
-      console.log("Falha no preload da library album:", error);
-    });
-
     hydrateOfflineState(queue.map((item) => item.contentId)).catch((error) => {
       console.log("Falha ao verificar estado offline:", error);
     });
-  }, [queue, preloadQueue, hydrateOfflineState]);
+  }, [queue, hydrateOfflineState]);
 
   const offlineCount = queue.filter((item) =>
     isTrackOffline(item.contentId)

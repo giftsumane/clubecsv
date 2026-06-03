@@ -1,7 +1,5 @@
-import { warmUpInitialPlayback } from "@/services/playerWarmup";
 import AppGradient from "@/src/components/AppGradient";
 import { useAuthStore } from "@/src/store/authStore";
-import { usePlayerStore } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -23,8 +21,7 @@ export default function WelcomeScreen() {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const subtitleFade = useRef(new Animated.Value(0)).current;
 
-  const [loadingText, setLoadingText] = useState("A carregar conteúdos");
-  const warmupStartedRef = useRef(false);
+  const [loadingText, setLoadingText] = useState("A preparar aplicação");
 
   const token = useAuthStore((state) => state.token);
   const hasHydrated = useAuthStore((state) => state.hasHydrated);
@@ -58,7 +55,7 @@ export default function WelcomeScreen() {
       }),
       Animated.timing(progressAnim, {
         toValue: 1,
-        duration: 2200,
+        duration: 1800,
         easing: Easing.inOut(Easing.ease),
         useNativeDriver: false,
       }),
@@ -87,6 +84,7 @@ export default function WelcomeScreen() {
 
     return () => {
       glowLoop.stop();
+      animations.stop();
     };
   }, [
     fadeAnim,
@@ -100,49 +98,18 @@ export default function WelcomeScreen() {
   useEffect(() => {
     if (!hasHydrated) return;
 
-    if (!token) {
-      router.replace("/(auth)/login");
-      return;
-    }
+    setLoadingText("A iniciar aplicação");
 
-    let cancelled = false;
-
-    async function boot() {
-      if (warmupStartedRef.current) return;
-      warmupStartedRef.current = true;
-
-      try {
-        setLoadingText("A preparar conteúdos");
-
-        await warmUpInitialPlayback();
-
-        if (cancelled) return;
-
-        const queue = usePlayerStore.getState().queue;
-
-        if (queue.length) {
-          setLoadingText("A optimizar reprodução");
-          usePlayerStore.getState().preloadQueue(queue, 0).catch(() => {});
-        }
-
-        setLoadingText("Quase pronto");
-      } catch (error) {
-        console.log("Warmup no welcome falhou:", error);
-        setLoadingText("A iniciar aplicação");
-      } finally {
-        setTimeout(() => {
-          if (!cancelled) {
-            router.replace("/(tabs)");
-          }
-        }, 700);
+    const timer = setTimeout(() => {
+      if (!token) {
+        router.replace("/(auth)/login");
+        return;
       }
-    }
 
-    boot();
+      router.replace("/(tabs)");
+    }, 500);
 
-    return () => {
-      cancelled = true;
-    };
+    return () => clearTimeout(timer);
   }, [hasHydrated, token]);
 
   const progressWidth = progressAnim.interpolate({

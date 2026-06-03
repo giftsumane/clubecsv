@@ -204,6 +204,17 @@ export async function getPlaybackData(
   const forceRefresh = options?.forceRefresh ?? false;
   const ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
 
+  const existingOffline = await getOfflineEntry(contentId);
+  if (existingOffline?.localUri && !forceRefresh) {
+    const result: PlaybackResponse = {
+      url: existingOffline.localUri,
+      type: "audio",
+    };
+
+    setCachedPlayback(contentId, result, ttlMs);
+    return result;
+  }
+
   if (!forceRefresh) {
     const cached = getCachedPlayback(contentId);
     if (cached) return cached;
@@ -283,6 +294,20 @@ export async function ensureOfflinePlayback(
 
     const remoteUrl = normalizePlaybackUrl(data.url);
 
+    if (!remoteUrl) {
+      throw new Error("URL inválida para download offline.");
+    }
+
+    if (remoteUrl.startsWith("file://")) {
+      await setOfflineEntry({
+        contentId,
+        localUri: remoteUrl,
+        remoteUrl,
+        downloadedAt: Date.now(),
+      });
+      return remoteUrl;
+    }
+
     // Se for HLS, devolvemos remoto.
     // Offline real para m3u8 exigiria outro fluxo.
     if (remoteUrl.endsWith(".m3u8")) {
@@ -331,10 +356,9 @@ export async function resolvePlayableUri(
   const preferOffline = options?.preferOffline ?? true;
 
   if (preferOffline) {
-    try {
-      return await ensureOfflinePlayback(contentId, options);
-    } catch (error) {
-      console.log("Falha ao preparar offline, usando stream:", error);
+    const existingOffline = await getOfflineEntry(contentId);
+    if (existingOffline?.localUri) {
+      return existingOffline.localUri;
     }
   }
 
@@ -364,9 +388,9 @@ export async function preloadPlayback(
 
   if (!uniqueIds.length) return;
 
-  const concurrency = Math.max(1, options?.concurrency ?? 2);
-  const delayMs = Math.max(0, options?.delayMs ?? 120);
-  const offline = options?.offline ?? true;
+  const concurrency = Math.max(1, options?.concurrency ?? 1);
+  const delayMs = Math.max(0, options?.delayMs ?? 180);
+  const offline = options?.offline ?? false;
 
   let cursor = 0;
 
@@ -379,13 +403,19 @@ export async function preloadPlayback(
 
       try {
         if (offline) {
-          await ensureOfflinePlayback(contentId, {
-            ttlMs: options?.ttlMs,
-          });
+          const alreadyOffline = await getOfflineEntry(contentId);
+          if (!alreadyOffline) {
+            await ensureOfflinePlayback(contentId, {
+              ttlMs: options?.ttlMs,
+            });
+          }
         } else {
-          await getPlaybackData(contentId, {
-            ttlMs: options?.ttlMs,
-          });
+          const existingOffline = await getOfflineEntry(contentId);
+          if (!existingOffline) {
+            await getPlaybackData(contentId, {
+              ttlMs: options?.ttlMs,
+            });
+          }
         }
       } catch (error) {
         console.log("Falha no preload de playback:", contentId, error);
