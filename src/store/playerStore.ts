@@ -763,6 +763,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       for (const track of safeTracks) {
         try {
+          const alreadyOffline = await isOfflineAvailable(track.contentId);
+
+          if (alreadyOffline) {
+            get().markOfflineAvailable(track.contentId, true);
+            continue;
+          }
+
           const localUri = await ensureOfflinePlayback(track.contentId, {
             forceRefresh: false,
           });
@@ -786,9 +793,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     const start = Math.max(0, aroundIndex);
     const ordered = [
-      ...safeTracks.slice(start, start + 3),
+      ...safeTracks.slice(start, start + 2),
       ...safeTracks.slice(0, start),
-      ...safeTracks.slice(start + 3),
+      ...safeTracks.slice(start + 2),
     ];
 
     const uniqueTracks = ordered.filter(
@@ -797,18 +804,24 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     );
 
     const idsToWarm = uniqueTracks
+      .slice(0, 2)
       .map((track) => track.contentId)
-      .filter((contentId) => !get().urlCache[contentId]);
+      .filter(
+        (contentId) =>
+          !!contentId &&
+          !get().urlCache[contentId] &&
+          !get().offlineMap[contentId]
+      );
 
     if (idsToWarm.length) {
       await preloadPlayback(idsToWarm, {
-        concurrency: 2,
-        delayMs: 120,
-        offline: true,
+        concurrency: 1,
+        delayMs: 180,
+        offline: false,
       }).catch(() => {});
     }
 
-    for (const track of uniqueTracks) {
+    for (const track of uniqueTracks.slice(0, 2)) {
       if (!track?.contentId) continue;
       if (get().urlCache[track.contentId]) continue;
 
@@ -834,8 +847,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queue: safeTracks,
       currentIndex: safeIndex,
     });
-
-    get().preloadQueue(safeTracks, safeIndex).catch(() => {});
 
     await enqueueSwitch(async () => {
       await get().playTrack(safeTracks[safeIndex], safeTracks, safeIndex);
@@ -949,9 +960,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         return;
       }
 
+      const isLocalSource = playbackUrl.startsWith("file://");
+
       const player = createAudioPlayer(playbackUrl, {
         updateInterval: 0.25,
-        downloadFirst: true,
+        downloadFirst: isLocalSource,
         keepAudioSessionActive: true,
       });
 
