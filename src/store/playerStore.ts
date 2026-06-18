@@ -166,8 +166,18 @@ function enqueueSwitch(task: () => Promise<void>) {
 }
 
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
-  if (cache[track.contentId]) {
-    return normalizePlaybackUrl(cache[track.contentId]);
+  const offlineUri = await resolvePlayableUri(track.contentId, {
+    preferOffline: true,
+  });
+
+  if (offlineUri?.startsWith("file://")) {
+    return normalizePlaybackUrl(offlineUri);
+  }
+
+  const cachedUrl = cache[track.contentId];
+
+  if (cachedUrl?.startsWith("file://")) {
+    return normalizePlaybackUrl(cachedUrl);
   }
 
   const existing = pendingUrlRequests[track.contentId];
