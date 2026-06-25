@@ -353,7 +353,7 @@ export async function resolvePlayableUri(
     ttlMs?: number;
   }
 ): Promise<string> {
-  const preferOffline = options?.preferOffline ?? true;
+  const preferOffline = options?.preferOffline ?? false;
 
   if (preferOffline) {
     const existingOffline = await getOfflineEntry(contentId);
@@ -389,8 +389,7 @@ export async function preloadPlayback(
   if (!uniqueIds.length) return;
 
   const concurrency = Math.max(1, options?.concurrency ?? 1);
-  const delayMs = Math.max(0, options?.delayMs ?? 180);
-  const offline = options?.offline ?? false;
+  const delayMs = Math.max(0, options?.delayMs ?? 250);
 
   let cursor = 0;
 
@@ -402,21 +401,11 @@ export async function preloadPlayback(
       const contentId = uniqueIds[index];
 
       try {
-        if (offline) {
-          const alreadyOffline = await getOfflineEntry(contentId);
-          if (!alreadyOffline) {
-            await ensureOfflinePlayback(contentId, {
-              ttlMs: options?.ttlMs,
-            });
-          }
-        } else {
-          const existingOffline = await getOfflineEntry(contentId);
-          if (!existingOffline) {
-            await getPlaybackData(contentId, {
-              ttlMs: options?.ttlMs,
-            });
-          }
-        }
+        // 1.0.6: preload nunca descarrega ficheiros.
+        // Mesmo que alguém passe offline:true por engano, apenas resolvemos metadata/URL.
+        await getPlaybackData(contentId, {
+          ttlMs: options?.ttlMs,
+        });
       } catch (error) {
         console.log("Falha no preload de playback:", contentId, error);
       }

@@ -1,7 +1,6 @@
 import {
   ensureOfflinePlayback,
   isOfflineAvailable,
-  preloadPlayback,
   resolvePlayableUri,
 } from "@/services/playback";
 import {
@@ -75,8 +74,6 @@ let playbackSubscription: { remove?: () => void } | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 
 const pendingUrlRequests: PendingUrlMap = {};
-const preloadedContentIds = new Set<number>();
-
 let desiredPlaying = false;
 let lastProgressAt = 0;
 let lastObservedPosition = 0;
@@ -170,17 +167,8 @@ function enqueueSwitch(task: () => Promise<void>) {
 }
 
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
-  const offlineUri = await resolvePlayableUri(track.contentId, {
-    preferOffline: true,
-  });
-
-  if (offlineUri?.startsWith("file://")) {
-    return normalizePlaybackUrl(offlineUri);
-  }
-
   const cachedUrl = cache[track.contentId];
-
-  if (cachedUrl?.startsWith("file://")) {
+  if (cachedUrl) {
     return normalizePlaybackUrl(cachedUrl);
   }
 
@@ -188,7 +176,7 @@ async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
   if (existing) return existing;
 
   const request = resolvePlayableUri(track.contentId, {
-    preferOffline: true,
+    preferOffline: false,
   })
     .then((uri) => {
       if (!uri) throw new Error("URI vazia para reprodução.");
@@ -230,10 +218,6 @@ async function safePauseAndRemove(player: AudioPlayer | null) {
   } catch {}
 }
 
-function rememberTrackUrlInState(contentId: number, url: string) {
-  usePlayerStore.getState().rememberUrl(contentId, url);
-}
-
 function maybeLogStatus(payload: {
   token: number;
   currentTime: number;
@@ -267,7 +251,7 @@ function maybeLogStatus(payload: {
 
   lastStatusSignature = signature;
 
-  console.log("PLAYER STATUS:", payload);
+  // console.log("PLAYER STATUS:", payload);
 }
 
 function startMonitor(token: number) {
@@ -305,13 +289,7 @@ function startMonitor(token: number) {
     if (currentTime <= 0) return;
     if (stalledForMs < 6000) return;
 
-    console.log("STALL DETECTED:", {
-      token,
-      currentTime,
-      stalledForMs,
-      stallRecoveryAttempts,
-      track: state.currentTrack.title,
-    });
+    // Stall recovery silencioso em produção.
 
     const currentTrack = state.currentTrack;
 
@@ -445,10 +423,9 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
         if (!desiredPlaying || !fresh.player) return;
     
         try {
-          console.log("FORCE START PLAY RETRY");
           fresh.player.play();
         } catch (error) {
-          console.log("Erro no retry inicial do play:", error);
+          // retry falhou
         }
       }, 250);
     
@@ -457,30 +434,6 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
     clearResumeRetryTimeout();
 
-    const freshState = usePlayerStore.getState();
-    const nextTrack = freshState.queue[freshState.currentIndex + 1];
-
-    if (
-      nextTrack?.contentId &&
-      !freshState.urlCache[nextTrack.contentId] &&
-      !preloadedContentIds.has(nextTrack.contentId)
-    ) {
-      preloadedContentIds.add(nextTrack.contentId);
-
-      resolveTrackUrl(nextTrack, freshState.urlCache)
-        .then((nextUrl) => {
-          rememberTrackUrlInState(nextTrack.contentId, nextUrl);
-
-          if (nextUrl.startsWith("file://")) {
-            usePlayerStore
-              .getState()
-              .markOfflineAvailable(nextTrack.contentId, true);
-          }
-        })
-        .catch(() => {
-          preloadedContentIds.delete(nextTrack.contentId);
-        });
-    }
 
     if (didJustFinish) {
       clearResumeRetryTimeout();
@@ -797,53 +750,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
 
-  preloadQueue: async (tracks, aroundIndex = 0) => {
-    const safeTracks = normalizeQueue(tracks);
-    if (!safeTracks.length) return;
-
-    const start = Math.max(0, aroundIndex);
-    const ordered = [
-      ...safeTracks.slice(start, start + 2),
-      ...safeTracks.slice(0, start),
-      ...safeTracks.slice(start + 2),
-    ];
-
-    const uniqueTracks = ordered.filter(
-      (track, index, arr) =>
-        arr.findIndex((item) => item.contentId === track.contentId) === index
-    );
-
-    const idsToWarm = uniqueTracks
-      .slice(0, 2)
-      .map((track) => track.contentId)
-      .filter(
-        (contentId) =>
-          !!contentId &&
-          !get().urlCache[contentId] &&
-          !get().offlineMap[contentId]
-      );
-
-    if (idsToWarm.length) {
-      await preloadPlayback(idsToWarm, {
-        concurrency: 1,
-        delayMs: 180,
-        offline: false,
-      }).catch(() => {});
-    }
-
-    for (const track of uniqueTracks.slice(0, 2)) {
-      if (!track?.contentId) continue;
-      if (get().urlCache[track.contentId]) continue;
-
-      try {
-        const url = await resolveTrackUrl(track, get().urlCache);
-        get().rememberUrl(track.contentId, url);
-
-        if (url.startsWith("file://")) {
-          get().markOfflineAvailable(track.contentId, true);
-        }
-      } catch {}
-    }
+  preloadQueue: async () => {
+    // Desactivado na 1.0.6: nada de preload automático.
+    // O player só resolve URL quando a faixa vai tocar.
+    return;
   },
 
   setQueueAndPlay: async (tracks, trackToPlay) => {
@@ -959,7 +869,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         stallRecoveryAttempts = 0;
         startMonitor(token);
 
-        get().preloadQueue(queue, nextIndex + 1).catch(() => {});
         return;
       }
 
@@ -973,7 +882,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const isLocalSource = playbackUrl.startsWith("file://");
 
       const player = createAudioPlayer(playbackUrl, {
-        updateInterval: 0.25,
+        updateInterval: 1,
         downloadFirst: isLocalSource,
         keepAudioSessionActive: true,
       });
@@ -1044,7 +953,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       stallRecoveryAttempts = 0;
       startMonitor(token);
 
-      get().preloadQueue(queue, nextIndex + 1).catch(() => {});
     } catch (error) {
       console.log("PLAY TRACK ERROR:", error);
 
