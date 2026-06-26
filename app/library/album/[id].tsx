@@ -159,14 +159,6 @@ export default function LibraryAlbumDetailScreen() {
         return;
       }
 
-      if (!isTrackOffline(item.id)) {
-        Alert.alert(
-          "Álbum não descarregado",
-          "Para evitar consumo de internet, descarrega este álbum antes de ouvir."
-        );
-        return;
-      }
-
       const track: Track = {
         id: item.id,
         contentId: item.id,
@@ -179,10 +171,6 @@ export default function LibraryAlbumDetailScreen() {
       await setQueueAndPlay(queue, track);
     } catch (error) {
       console.log("Erro ao tocar faixa da library:", error);
-      Alert.alert(
-        "Erro",
-        "Não foi possível tocar esta faixa. Confirma se o álbum está descarregado."
-      );
     }
   };
 

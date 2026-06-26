@@ -1,7 +1,8 @@
 import {
   ensureOfflinePlayback,
-  getOfflineUri,
   isOfflineAvailable,
+  preloadPlayback,
+  resolvePlayableUri,
 } from "@/services/playback";
 import {
   createAudioPlayer,
@@ -74,6 +75,8 @@ let playbackSubscription: { remove?: () => void } | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 
 const pendingUrlRequests: PendingUrlMap = {};
+const preloadedContentIds = new Set<number>();
+
 let desiredPlaying = false;
 let lastProgressAt = 0;
 let lastObservedPosition = 0;
@@ -167,21 +170,23 @@ function enqueueSwitch(task: () => Promise<void>) {
 }
 
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
-  const cachedUrl = cache[track.contentId];
-  if (cachedUrl?.startsWith("file://")) {
-    return normalizePlaybackUrl(cachedUrl);
+  if (cache[track.contentId]) {
+    return normalizePlaybackUrl(cache[track.contentId]);
   }
 
   const existing = pendingUrlRequests[track.contentId];
   if (existing) return existing;
 
-  const request = getOfflineUri(track.contentId)
-    .then((localUri) => {
-      if (!localUri?.startsWith("file://")) {
-        throw new Error("Esta música ainda não está descarregada. Descarrega o álbum para ouvir.");
-      }
-
-      return normalizePlaybackUrl(localUri);
+  const request = resolvePlayableUri(track.contentId, {
+    preferOffline: true,
+  })
+    .then((uri) => {
+      if (!uri) throw new Error("URI vazia para reprodução.");
+      return normalizePlaybackUrl(uri);
+    })
+    .catch((error) => {
+      if (track.url) return normalizePlaybackUrl(track.url);
+      throw error;
     })
     .finally(() => {
       delete pendingUrlRequests[track.contentId];
@@ -213,6 +218,10 @@ async function safePauseAndRemove(player: AudioPlayer | null) {
   try {
     player.remove();
   } catch {}
+}
+
+function rememberTrackUrlInState(contentId: number, url: string) {
+  usePlayerStore.getState().rememberUrl(contentId, url);
 }
 
 function maybeLogStatus(payload: {
@@ -248,7 +257,7 @@ function maybeLogStatus(payload: {
 
   lastStatusSignature = signature;
 
-  // console.log("PLAYER STATUS:", payload);
+  console.log("PLAYER STATUS:", payload);
 }
 
 function startMonitor(token: number) {
@@ -286,7 +295,13 @@ function startMonitor(token: number) {
     if (currentTime <= 0) return;
     if (stalledForMs < 6000) return;
 
-    // Stall recovery silencioso em produção.
+    console.log("STALL DETECTED:", {
+      token,
+      currentTime,
+      stalledForMs,
+      stallRecoveryAttempts,
+      track: state.currentTrack.title,
+    });
 
     const currentTrack = state.currentTrack;
 
@@ -420,9 +435,10 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
         if (!desiredPlaying || !fresh.player) return;
     
         try {
+          console.log("FORCE START PLAY RETRY");
           fresh.player.play();
         } catch (error) {
-          // retry falhou
+          console.log("Erro no retry inicial do play:", error);
         }
       }, 250);
     
@@ -431,6 +447,30 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
     clearResumeRetryTimeout();
 
+    const freshState = usePlayerStore.getState();
+    const nextTrack = freshState.queue[freshState.currentIndex + 1];
+
+    if (
+      nextTrack?.contentId &&
+      !freshState.urlCache[nextTrack.contentId] &&
+      !preloadedContentIds.has(nextTrack.contentId)
+    ) {
+      preloadedContentIds.add(nextTrack.contentId);
+
+      resolveTrackUrl(nextTrack, freshState.urlCache)
+        .then((nextUrl) => {
+          rememberTrackUrlInState(nextTrack.contentId, nextUrl);
+
+          if (nextUrl.startsWith("file://")) {
+            usePlayerStore
+              .getState()
+              .markOfflineAvailable(nextTrack.contentId, true);
+          }
+        })
+        .catch(() => {
+          preloadedContentIds.delete(nextTrack.contentId);
+        });
+    }
 
     if (didJustFinish) {
       clearResumeRetryTimeout();
@@ -747,9 +787,53 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
 
-  preloadQueue: async () => {
-    // Offline-only: nada de preload, buffering ou resolução online.
-    return;
+  preloadQueue: async (tracks, aroundIndex = 0) => {
+    const safeTracks = normalizeQueue(tracks);
+    if (!safeTracks.length) return;
+
+    const start = Math.max(0, aroundIndex);
+    const ordered = [
+      ...safeTracks.slice(start, start + 2),
+      ...safeTracks.slice(0, start),
+      ...safeTracks.slice(start + 2),
+    ];
+
+    const uniqueTracks = ordered.filter(
+      (track, index, arr) =>
+        arr.findIndex((item) => item.contentId === track.contentId) === index
+    );
+
+    const idsToWarm = uniqueTracks
+      .slice(0, 2)
+      .map((track) => track.contentId)
+      .filter(
+        (contentId) =>
+          !!contentId &&
+          !get().urlCache[contentId] &&
+          !get().offlineMap[contentId]
+      );
+
+    if (idsToWarm.length) {
+      await preloadPlayback(idsToWarm, {
+        concurrency: 1,
+        delayMs: 180,
+        offline: false,
+      }).catch(() => {});
+    }
+
+    for (const track of uniqueTracks.slice(0, 2)) {
+      if (!track?.contentId) continue;
+      if (get().urlCache[track.contentId]) continue;
+
+      try {
+        const url = await resolveTrackUrl(track, get().urlCache);
+        get().rememberUrl(track.contentId, url);
+
+        if (url.startsWith("file://")) {
+          get().markOfflineAvailable(track.contentId, true);
+        }
+      } catch {}
+    }
   },
 
   setQueueAndPlay: async (tracks, trackToPlay) => {
@@ -832,11 +916,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       get().rememberUrl(track.contentId, playbackUrl);
 
-      if (!playbackUrl.startsWith("file://")) {
-        throw new Error("Reprodução online bloqueada. Descarrega o álbum para ouvir.");
+      if (playbackUrl.startsWith("file://")) {
+        get().markOfflineAvailable(track.contentId, true);
       }
-
-      get().markOfflineAvailable(track.contentId, true);
 
       if (sameTrack && currentPlayer) {
         attachPlaybackListener(currentPlayer, token);
@@ -867,6 +949,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         stallRecoveryAttempts = 0;
         startMonitor(token);
 
+        get().preloadQueue(queue, nextIndex + 1).catch(() => {});
         return;
       }
 
@@ -880,7 +963,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const isLocalSource = playbackUrl.startsWith("file://");
 
       const player = createAudioPlayer(playbackUrl, {
-        updateInterval: 1,
+        updateInterval: 0.25,
         downloadFirst: isLocalSource,
         keepAudioSessionActive: true,
       });
@@ -951,6 +1034,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       stallRecoveryAttempts = 0;
       startMonitor(token);
 
+      get().preloadQueue(queue, nextIndex + 1).catch(() => {});
     } catch (error) {
       console.log("PLAY TRACK ERROR:", error);
 

@@ -347,33 +347,87 @@ export async function ensureOfflinePlayback(
 
 export async function resolvePlayableUri(
   contentId: number,
-  _options?: {
+  options?: {
     preferOffline?: boolean;
     forceRefresh?: boolean;
     ttlMs?: number;
   }
 ): Promise<string> {
-  // Offline-only: nunca devolve URL remota para o player.
-  const existingOffline = await getOfflineEntry(contentId);
+  const preferOffline = options?.preferOffline ?? true;
 
-  if (existingOffline?.localUri?.startsWith("file://")) {
-    return existingOffline.localUri;
+  if (preferOffline) {
+    const existingOffline = await getOfflineEntry(contentId);
+    if (existingOffline?.localUri) {
+      return existingOffline.localUri;
+    }
   }
 
-  throw new Error("Conteúdo não descarregado. Descarrega o álbum para ouvir.");
+  return resolvePlaybackUrl(contentId, options);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function preloadPlayback(
   contentIds: number[],
-  _options?: {
+  options?: {
     ttlMs?: number;
     concurrency?: number;
     delayMs?: number;
     offline?: boolean;
   }
 ): Promise<void> {
-  // Offline-only: preload totalmente desactivado para impedir tráfego escondido.
-  return;
+  const uniqueIds = [
+    ...new Set(
+      contentIds
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    ),
+  ];
+
+  if (!uniqueIds.length) return;
+
+  const concurrency = Math.max(1, options?.concurrency ?? 1);
+  const delayMs = Math.max(0, options?.delayMs ?? 180);
+  const offline = options?.offline ?? false;
+
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= uniqueIds.length) return;
+
+      const contentId = uniqueIds[index];
+
+      try {
+        if (offline) {
+          const alreadyOffline = await getOfflineEntry(contentId);
+          if (!alreadyOffline) {
+            await ensureOfflinePlayback(contentId, {
+              ttlMs: options?.ttlMs,
+            });
+          }
+        } else {
+          const existingOffline = await getOfflineEntry(contentId);
+          if (!existingOffline) {
+            await getPlaybackData(contentId, {
+              ttlMs: options?.ttlMs,
+            });
+          }
+        }
+      } catch (error) {
+        console.log("Falha no preload de playback:", contentId, error);
+      }
+
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 }
 
 export async function getOfflineEntries(): Promise<OfflineEntry[]> {
