@@ -1,7 +1,7 @@
 import {
   ensureOfflinePlayback,
+  getOfflineUri,
   isOfflineAvailable,
-  resolvePlayableUri,
 } from "@/services/playback";
 import {
   createAudioPlayer,
@@ -168,23 +168,20 @@ function enqueueSwitch(task: () => Promise<void>) {
 
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
   const cachedUrl = cache[track.contentId];
-  if (cachedUrl) {
+  if (cachedUrl?.startsWith("file://")) {
     return normalizePlaybackUrl(cachedUrl);
   }
 
   const existing = pendingUrlRequests[track.contentId];
   if (existing) return existing;
 
-  const request = resolvePlayableUri(track.contentId, {
-    preferOffline: false,
-  })
-    .then((uri) => {
-      if (!uri) throw new Error("URI vazia para reprodução.");
-      return normalizePlaybackUrl(uri);
-    })
-    .catch((error) => {
-      if (track.url) return normalizePlaybackUrl(track.url);
-      throw error;
+  const request = getOfflineUri(track.contentId)
+    .then((localUri) => {
+      if (!localUri?.startsWith("file://")) {
+        throw new Error("Esta música ainda não está descarregada. Descarrega o álbum para ouvir.");
+      }
+
+      return normalizePlaybackUrl(localUri);
     })
     .finally(() => {
       delete pendingUrlRequests[track.contentId];
@@ -751,8 +748,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   preloadQueue: async () => {
-    // Desactivado na 1.0.6: nada de preload automático.
-    // O player só resolve URL quando a faixa vai tocar.
+    // Offline-only: nada de preload, buffering ou resolução online.
     return;
   },
 
@@ -836,9 +832,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       get().rememberUrl(track.contentId, playbackUrl);
 
-      if (playbackUrl.startsWith("file://")) {
-        get().markOfflineAvailable(track.contentId, true);
+      if (!playbackUrl.startsWith("file://")) {
+        throw new Error("Reprodução online bloqueada. Descarrega o álbum para ouvir.");
       }
+
+      get().markOfflineAvailable(track.contentId, true);
 
       if (sameTrack && currentPlayer) {
         attachPlaybackListener(currentPlayer, token);

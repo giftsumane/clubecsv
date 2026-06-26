@@ -347,76 +347,33 @@ export async function ensureOfflinePlayback(
 
 export async function resolvePlayableUri(
   contentId: number,
-  options?: {
+  _options?: {
     preferOffline?: boolean;
     forceRefresh?: boolean;
     ttlMs?: number;
   }
 ): Promise<string> {
-  const preferOffline = options?.preferOffline ?? false;
+  // Offline-only: nunca devolve URL remota para o player.
+  const existingOffline = await getOfflineEntry(contentId);
 
-  if (preferOffline) {
-    const existingOffline = await getOfflineEntry(contentId);
-    if (existingOffline?.localUri) {
-      return existingOffline.localUri;
-    }
+  if (existingOffline?.localUri?.startsWith("file://")) {
+    return existingOffline.localUri;
   }
 
-  return resolvePlaybackUrl(contentId, options);
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  throw new Error("Conteúdo não descarregado. Descarrega o álbum para ouvir.");
 }
 
 export async function preloadPlayback(
   contentIds: number[],
-  options?: {
+  _options?: {
     ttlMs?: number;
     concurrency?: number;
     delayMs?: number;
     offline?: boolean;
   }
 ): Promise<void> {
-  const uniqueIds = [
-    ...new Set(
-      contentIds
-        .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id) && id > 0)
-    ),
-  ];
-
-  if (!uniqueIds.length) return;
-
-  const concurrency = Math.max(1, options?.concurrency ?? 1);
-  const delayMs = Math.max(0, options?.delayMs ?? 250);
-
-  let cursor = 0;
-
-  async function worker() {
-    while (true) {
-      const index = cursor++;
-      if (index >= uniqueIds.length) return;
-
-      const contentId = uniqueIds[index];
-
-      try {
-        // 1.0.6: preload nunca descarrega ficheiros.
-        // Mesmo que alguém passe offline:true por engano, apenas resolvemos metadata/URL.
-        await getPlaybackData(contentId, {
-          ttlMs: options?.ttlMs,
-        });
-      } catch (error) {
-        console.log("Falha no preload de playback:", contentId, error);
-      }
-
-      if (delayMs > 0) {
-        await sleep(delayMs);
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  // Offline-only: preload totalmente desactivado para impedir tráfego escondido.
+  return;
 }
 
 export async function getOfflineEntries(): Promise<OfflineEntry[]> {
