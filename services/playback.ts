@@ -7,12 +7,6 @@ export type PlaybackResponse = {
   type?: string;
 };
 
-type PlaybackCacheEntry = {
-  url: string;
-  type?: string;
-  expiresAt: number;
-};
-
 type OfflineEntry = {
   contentId: number;
   localUri: string;
@@ -20,11 +14,8 @@ type OfflineEntry = {
   downloadedAt: number;
 };
 
-const playbackCache = new Map<number, PlaybackCacheEntry>();
-const pendingPlaybackRequests = new Map<number, Promise<PlaybackResponse>>();
 const pendingOfflineDownloads = new Map<number, Promise<string>>();
 
-const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MEDIA_ORIGIN = "https://csveventos.co.mz";
 const OFFLINE_INDEX_KEY = "playback_offline_index_v1";
 const AUDIO_CACHE_DIR = `${FileSystem.documentDirectory}audio-cache/`;
@@ -36,63 +27,62 @@ function normalizePlaybackUrl(url: string): string {
   if (!url) return "";
 
   let normalized = url.trim();
-
   if (!normalized) return "";
 
-  // Importantíssimo: respeitar ficheiros locais
-  if (normalized.startsWith("file://")) {
-    return normalized;
-  }
+  if (normalized.startsWith("file://")) return normalized;
 
   normalized = normalized.replace(/^http:\/\//i, "https://");
   normalized = normalized.replace("www.csveventos.co.mz", "csveventos.co.mz");
-  normalized = normalized.replace(
-    "bilhetes.csveventos.co.mz",
-    "csveventos.co.mz"
-  );
+  normalized = normalized.replace("bilhetes.csveventos.co.mz", "csveventos.co.mz");
   normalized = normalized.replace(
     "/laravel/storage/app/public/",
     "/laravel/public/storage/"
   );
 
   if (!/^https?:\/\//i.test(normalized)) {
-    normalized = `${MEDIA_ORIGIN}${
-      normalized.startsWith("/") ? "" : "/"
-    }${normalized}`;
+    normalized = `${MEDIA_ORIGIN}${normalized.startsWith("/") ? "" : "/"}${normalized}`;
   }
 
   return normalized;
 }
 
-function getCachedPlayback(contentId: number): PlaybackResponse | null {
-  const cached = playbackCache.get(contentId);
-  if (!cached) return null;
-
-  if (Date.now() >= cached.expiresAt) {
-    playbackCache.delete(contentId);
-    return null;
-  }
-
-  return {
-    url: cached.url,
-    type: cached.type,
-  };
+function cleanUrl(url: string) {
+  return url.split("?")[0].split("#")[0].toLowerCase();
 }
 
-function setCachedPlayback(
-  contentId: number,
-  data: PlaybackResponse,
-  ttlMs = DEFAULT_TTL_MS
-) {
-  playbackCache.set(contentId, {
-    url: data.url,
-    type: data.type,
-    expiresAt: Date.now() + ttlMs,
-  });
+function isHlsUrl(url: string) {
+  return cleanUrl(url).endsWith(".m3u8");
+}
+
+function isDownloadableAudioUrl(url: string) {
+  const clean = cleanUrl(url);
+  return (
+    clean.endsWith(".mp3") ||
+    clean.endsWith(".m4a") ||
+    clean.endsWith(".aac") ||
+    clean.endsWith(".wav")
+  );
+}
+
+function getFileExtensionFromUrl(url: string) {
+  const clean = cleanUrl(url);
+
+  if (clean.endsWith(".m4a")) return "m4a";
+  if (clean.endsWith(".aac")) return "aac";
+  if (clean.endsWith(".wav")) return "wav";
+  if (clean.endsWith(".mp3")) return "mp3";
+
+  return "mp3";
+}
+
+function buildOfflineFileUri(contentId: number, remoteUrl: string) {
+  const ext = getFileExtensionFromUrl(remoteUrl);
+  return `${AUDIO_CACHE_DIR}${contentId}.${ext}`;
 }
 
 async function ensureAudioCacheDir() {
   const dirInfo = await FileSystem.getInfoAsync(AUDIO_CACHE_DIR);
+
   if (!dirInfo.exists) {
     await FileSystem.makeDirectoryAsync(AUDIO_CACHE_DIR, {
       intermediates: true,
@@ -119,64 +109,38 @@ async function saveOfflineIndex() {
   await AsyncStorage.setItem(OFFLINE_INDEX_KEY, JSON.stringify(offlineIndex));
 }
 
-function getFileExtensionFromUrl(url: string) {
-  const clean = url.split("?")[0].split("#")[0].toLowerCase();
-
-  if (clean.endsWith(".m4a")) return "m4a";
-  if (clean.endsWith(".aac")) return "aac";
-  if (clean.endsWith(".wav")) return "wav";
-  if (clean.endsWith(".mp3")) return "mp3";
-  if (clean.endsWith(".m3u8")) return "m3u8";
-
-  return "mp3";
-}
-
-function buildOfflineFileUri(contentId: number, remoteUrl: string) {
-  const ext = getFileExtensionFromUrl(remoteUrl);
-  return `${AUDIO_CACHE_DIR}${contentId}.${ext}`;
-}
-
 async function getOfflineEntry(contentId: number): Promise<OfflineEntry | null> {
   const index = await loadOfflineIndex();
   const entry = index[contentId];
+
   if (!entry?.localUri) return null;
 
   try {
     const info = await FileSystem.getInfoAsync(entry.localUri);
-    if (info.exists) return entry;
+
+    if (info.exists && entry.localUri.startsWith("file://")) {
+      return entry;
+    }
   } catch {}
 
   delete index[contentId];
   await saveOfflineIndex();
+
   return null;
 }
 
 async function setOfflineEntry(entry: OfflineEntry) {
+  if (!entry.localUri.startsWith("file://")) {
+    throw new Error("Entrada offline inválida: localUri não é file://");
+  }
+
   const index = await loadOfflineIndex();
   index[entry.contentId] = entry;
   await saveOfflineIndex();
 }
 
-export function clearPlaybackCache(contentId?: number) {
-  if (typeof contentId === "number") {
-    playbackCache.delete(contentId);
-    pendingPlaybackRequests.delete(contentId);
-    pendingOfflineDownloads.delete(contentId);
-    return;
-  }
-
-  playbackCache.clear();
-  pendingPlaybackRequests.clear();
-  pendingOfflineDownloads.clear();
-}
-
-export async function isPlaybackCached(contentId: number) {
-  return !!getCachedPlayback(contentId);
-}
-
 export async function isOfflineAvailable(contentId: number) {
-  const entry = await getOfflineEntry(contentId);
-  return !!entry;
+  return !!(await getOfflineEntry(contentId));
 }
 
 export async function getOfflineUri(contentId: number) {
@@ -197,77 +161,55 @@ export async function removeOfflinePlayback(contentId: number) {
   await saveOfflineIndex();
 }
 
-export async function getPlaybackData(
-  contentId: number,
-  options?: { forceRefresh?: boolean; ttlMs?: number }
-): Promise<PlaybackResponse> {
-  const forceRefresh = options?.forceRefresh ?? false;
-  const ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+/**
+ * Usa API apenas para descobrir o ficheiro remoto DURANTE o download explícito.
+ * Não usar esta função para tocar.
+ */
+export async function getPlaybackData(contentId: number): Promise<PlaybackResponse> {
+  const { data } = await api.get(`/contents/${contentId}/stream`);
 
-  const existingOffline = await getOfflineEntry(contentId);
-  if (existingOffline?.localUri && !forceRefresh) {
-    const result: PlaybackResponse = {
-      url: existingOffline.localUri,
-      type: "audio",
-    };
+  const rawUrl =
+    data?.url ??
+    data?.stream_url ??
+    data?.media_url ??
+    data?.hls_master_url ??
+    null;
 
-    setCachedPlayback(contentId, result, ttlMs);
-    return result;
+  if (!rawUrl || typeof rawUrl !== "string") {
+    throw new Error("URL de áudio não disponível.");
   }
 
-  if (!forceRefresh) {
-    const cached = getCachedPlayback(contentId);
-    if (cached) return cached;
+  const finalUrl = normalizePlaybackUrl(rawUrl);
+
+  if (!finalUrl) {
+    throw new Error("URL de áudio inválida.");
   }
 
-  if (!forceRefresh) {
-    const existingRequest = pendingPlaybackRequests.get(contentId);
-    if (existingRequest) return existingRequest;
-  }
-
-  const request = api
-    .get(`/contents/${contentId}/stream`)
-    .then(({ data }) => {
-      const rawUrl =
-        data?.url ??
-        data?.stream_url ??
-        data?.media_url ??
-        data?.hls_master_url ??
-        null;
-
-      if (!rawUrl || typeof rawUrl !== "string") {
-        throw new Error("URL de reprodução não disponível.");
-      }
-
-      const finalUrl = normalizePlaybackUrl(rawUrl);
-      if (!finalUrl) {
-        throw new Error("URL de reprodução inválida.");
-      }
-
-      const result: PlaybackResponse = {
-        url: finalUrl,
-        type: typeof data?.type === "string" ? data.type : "audio",
-      };
-
-      setCachedPlayback(contentId, result, ttlMs);
-      return result;
-    })
-    .finally(() => {
-      pendingPlaybackRequests.delete(contentId);
-    });
-
-  pendingPlaybackRequests.set(contentId, request);
-  return request;
+  return {
+    url: finalUrl,
+    type: typeof data?.type === "string" ? data.type : "audio",
+  };
 }
 
-export async function resolvePlaybackUrl(
-  contentId: number,
-  options?: { forceRefresh?: boolean; ttlMs?: number }
-): Promise<string> {
-  const data = await getPlaybackData(contentId, options);
-  return data.url;
+/**
+ * REGRA FORTE:
+ * Para tocar, só devolve file://.
+ * Nunca devolve https://, m3u8 ou qualquer URL remota.
+ */
+export async function resolvePlayableUri(contentId: number): Promise<string> {
+  const entry = await getOfflineEntry(contentId);
+
+  if (entry?.localUri?.startsWith("file://")) {
+    return entry.localUri;
+  }
+
+  throw new Error("Faixa não está offline. Descarrega o álbum antes de tocar.");
 }
 
+/**
+ * Único ponto que pode descarregar áudio.
+ * Deve ser chamado apenas pelo botão "Descarregar álbum/faixa".
+ */
 export async function ensureOfflinePlayback(
   contentId: number,
   options?: { forceRefresh?: boolean; ttlMs?: number }
@@ -276,7 +218,8 @@ export async function ensureOfflinePlayback(
 
   if (!forceRefresh) {
     const existingOffline = await getOfflineEntry(contentId);
-    if (existingOffline?.localUri) {
+
+    if (existingOffline?.localUri?.startsWith("file://")) {
       return existingOffline.localUri;
     }
   }
@@ -287,36 +230,28 @@ export async function ensureOfflinePlayback(
   const request = (async () => {
     await ensureAudioCacheDir();
 
-    const data = await getPlaybackData(contentId, {
-      forceRefresh: options?.forceRefresh,
-      ttlMs: options?.ttlMs,
-    });
+    const playbackData = await getPlaybackData(contentId);
+    const remoteUrl = normalizePlaybackUrl(playbackData.url);
 
-    const remoteUrl = normalizePlaybackUrl(data.url);
-
-    if (!remoteUrl) {
-      throw new Error("URL inválida para download offline.");
+    if (!remoteUrl || remoteUrl.startsWith("file://")) {
+      throw new Error("URL remota inválida para download.");
     }
 
-    if (remoteUrl.startsWith("file://")) {
-      await setOfflineEntry({
-        contentId,
-        localUri: remoteUrl,
-        remoteUrl,
-        downloadedAt: Date.now(),
-      });
-      return remoteUrl;
+    if (isHlsUrl(remoteUrl)) {
+      throw new Error(
+        "Este conteúdo está em HLS (.m3u8). Para offline 100%, usa MP3/M4A/AAC/WAV directo."
+      );
     }
 
-    // Se for HLS, devolvemos remoto.
-    // Offline real para m3u8 exigiria outro fluxo.
-    if (remoteUrl.endsWith(".m3u8")) {
-      return remoteUrl;
+    if (!isDownloadableAudioUrl(remoteUrl)) {
+      throw new Error(
+        "Formato não suportado para offline. Usa MP3, M4A, AAC ou WAV."
+      );
     }
 
     const targetUri = buildOfflineFileUri(contentId, remoteUrl);
-
     const info = await FileSystem.getInfoAsync(targetUri);
+
     if (!forceRefresh && info.exists) {
       await setOfflineEntry({
         contentId,
@@ -324,19 +259,24 @@ export async function ensureOfflinePlayback(
         remoteUrl,
         downloadedAt: Date.now(),
       });
+
       return targetUri;
     }
 
-    await FileSystem.downloadAsync(remoteUrl, targetUri);
+    const result = await FileSystem.downloadAsync(remoteUrl, targetUri);
+
+    if (!result?.uri?.startsWith("file://")) {
+      throw new Error("Download falhou: ficheiro local inválido.");
+    }
 
     await setOfflineEntry({
       contentId,
-      localUri: targetUri,
+      localUri: result.uri,
       remoteUrl,
       downloadedAt: Date.now(),
     });
 
-    return targetUri;
+    return result.uri;
   })().finally(() => {
     pendingOfflineDownloads.delete(contentId);
   });
@@ -345,89 +285,23 @@ export async function ensureOfflinePlayback(
   return request;
 }
 
-export async function resolvePlayableUri(
-  contentId: number,
-  options?: {
-    preferOffline?: boolean;
-    forceRefresh?: boolean;
-    ttlMs?: number;
-  }
-): Promise<string> {
-  const preferOffline = options?.preferOffline ?? true;
-
-  if (preferOffline) {
-    const existingOffline = await getOfflineEntry(contentId);
-    if (existingOffline?.localUri) {
-      return existingOffline.localUri;
-    }
-  }
-
-  return resolvePlaybackUrl(contentId, options);
+/**
+ * Desactivado para impedir tráfego em background.
+ */
+export async function preloadPlayback(): Promise<void> {
+  return;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export async function resolvePlaybackUrl(contentId: number): Promise<string> {
+  return resolvePlayableUri(contentId);
 }
 
-export async function preloadPlayback(
-  contentIds: number[],
-  options?: {
-    ttlMs?: number;
-    concurrency?: number;
-    delayMs?: number;
-    offline?: boolean;
-  }
-): Promise<void> {
-  const uniqueIds = [
-    ...new Set(
-      contentIds
-        .map((id) => Number(id))
-        .filter((id) => Number.isFinite(id) && id > 0)
-    ),
-  ];
+export async function isPlaybackCached(contentId: number) {
+  return isOfflineAvailable(contentId);
+}
 
-  if (!uniqueIds.length) return;
-
-  const concurrency = Math.max(1, options?.concurrency ?? 1);
-  const delayMs = Math.max(0, options?.delayMs ?? 180);
-  const offline = options?.offline ?? false;
-
-  let cursor = 0;
-
-  async function worker() {
-    while (true) {
-      const index = cursor++;
-      if (index >= uniqueIds.length) return;
-
-      const contentId = uniqueIds[index];
-
-      try {
-        if (offline) {
-          const alreadyOffline = await getOfflineEntry(contentId);
-          if (!alreadyOffline) {
-            await ensureOfflinePlayback(contentId, {
-              ttlMs: options?.ttlMs,
-            });
-          }
-        } else {
-          const existingOffline = await getOfflineEntry(contentId);
-          if (!existingOffline) {
-            await getPlaybackData(contentId, {
-              ttlMs: options?.ttlMs,
-            });
-          }
-        }
-      } catch (error) {
-        console.log("Falha no preload de playback:", contentId, error);
-      }
-
-      if (delayMs > 0) {
-        await sleep(delayMs);
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+export function clearPlaybackCache() {
+  pendingOfflineDownloads.clear();
 }
 
 export async function getOfflineEntries(): Promise<OfflineEntry[]> {

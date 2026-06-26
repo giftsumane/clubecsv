@@ -1,4 +1,3 @@
-import { cacheImage } from "@/services/imageCache";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -17,24 +16,14 @@ type LibraryState = {
   getAlbumDetail: (id: number) => Album | null;
 };
 
-async function cacheAlbumImages(album: Album): Promise<Album> {
-  const cachedCover = await cacheImage(album.cover_url);
-
-  const tracks = album.tracks || album.contents || [];
-
-  const cachedTracks = await Promise.all(
-    tracks.map(async (track: any) => ({
-      ...track,
-      cover_url: await cacheImage(track.cover_url || album.cover_url),
-    }))
-  );
+function normalizeAlbum(album: Album): Album {
+  const tracks = (album as any).tracks || (album as any).contents || [];
 
   return {
     ...album,
-    cover_url: cachedCover || album.cover_url,
-    tracks: album.tracks ? cachedTracks : album.tracks,
-    contents: album.contents ? cachedTracks : album.contents,
-  };
+    tracks: (album as any).tracks ? tracks : (album as any).tracks,
+    contents: (album as any).contents ? tracks : (album as any).contents,
+  } as Album;
 }
 
 export const useLibraryStore = create<LibraryState>()(
@@ -58,25 +47,11 @@ export const useLibraryStore = create<LibraryState>()(
           const albums = Array.isArray(data?.albums) ? data.albums : [];
           const musics = Array.isArray(data?.musics) ? data.musics : [];
 
-          const cachedAlbums = await Promise.all(
-            albums.map(async (album: Album) => ({
-              ...album,
-              cover_url:
-                (await cacheImage(album.cover_url)) || album.cover_url,
-            }))
-          );
-
-          const cachedMusics = await Promise.all(
-            musics.map(async (music: Music) => ({
-              ...music,
-              cover_url:
-                (await cacheImage(music.cover_url)) || music.cover_url,
-            }))
-          );
-
+          // 1.0.6: não fazemos download/cache manual de imagens aqui.
+          // O React Native/Image decide o cache normal. Isto evita tráfego invisível.
           set({
-            albums: cachedAlbums,
-            musics: cachedMusics,
+            albums,
+            musics,
             loading: false,
           });
         } catch (error) {
@@ -85,15 +60,16 @@ export const useLibraryStore = create<LibraryState>()(
         }
       },
 
-      saveAlbumDetail: async (album) => {
+      saveAlbumDetail: (album) => {
         if (!album?.id) return;
 
-        const cachedAlbum = await cacheAlbumImages(album);
+        const normalizedAlbum = normalizeAlbum(album);
 
+        // 1.0.6: guardar metadata/URLs apenas. Sem cacheImage automático.
         set((state) => ({
           albumDetails: {
             ...state.albumDetails,
-            [cachedAlbum.id]: cachedAlbum,
+            [normalizedAlbum.id]: normalizedAlbum,
           },
         }));
       },

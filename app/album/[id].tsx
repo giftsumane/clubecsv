@@ -29,7 +29,6 @@ export default function AlbumDetailScreen() {
   const getAlbumDetail = useLibraryStore((state) => state.getAlbumDetail);
 
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
-  const preloadQueue = usePlayerStore((state) => state.preloadQueue);
   const currentTrack = usePlayerStore((state) => state.currentTrack);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const isLoading = usePlayerStore((state) => state.isLoading);
@@ -112,14 +111,10 @@ export default function AlbumDetailScreen() {
   useEffect(() => {
     if (!queue.length) return;
 
-    preloadQueue(queue).catch((error) => {
-      console.log("Falha no preload do álbum:", error);
-    });
-
     hydrateOfflineState(queue.map((item) => item.contentId)).catch((error) => {
       console.log("Falha ao verificar estado offline:", error);
     });
-  }, [queue, preloadQueue, hydrateOfflineState]);
+  }, [queue, hydrateOfflineState]);
 
   const offlineCount = queue.filter((item) =>
     isTrackOffline(item.contentId)
@@ -146,6 +141,14 @@ export default function AlbumDetailScreen() {
         return;
       }
 
+      if (!isTrackOffline(track.id)) {
+        Alert.alert(
+          "Álbum não descarregado",
+          "Para evitar consumo de internet, descarrega este álbum antes de ouvir."
+        );
+        return;
+      }
+
       const selectedTrack: Track = {
         id: track.id,
         contentId: track.id,
@@ -158,6 +161,10 @@ export default function AlbumDetailScreen() {
       await setQueueAndPlay(queue, selectedTrack);
     } catch (error) {
       console.log("Erro ao tocar faixa:", error);
+      Alert.alert(
+        "Erro",
+        "Não foi possível tocar esta faixa. Confirma se o álbum está descarregado."
+      );
     }
   };
 

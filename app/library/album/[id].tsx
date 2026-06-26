@@ -53,6 +53,9 @@ export default function LibraryAlbumDetailScreen() {
   const isLoading = usePlayerStore((state) => state.isLoading);
   const isBuffering = usePlayerStore((state) => state.isBuffering);
   const isDownloading = usePlayerStore((state) => state.isDownloading);
+  const downloadAlbumProgress = usePlayerStore(
+    (state) => state.downloadAlbumProgress
+  );
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const downloadAlbumOffline = usePlayerStore(
@@ -63,46 +66,45 @@ export default function LibraryAlbumDetailScreen() {
   );
   const isTrackOffline = usePlayerStore((state) => state.isTrackOffline);
 
-  const contents = album?.contents || album?.tracks || [];
-
-  const coverHeight = Math.max(140, Math.min(190, height * 0.23));
-
   const saveAlbumDetail = useLibraryStore((state) => state.saveAlbumDetail);
   const getAlbumDetail = useLibraryStore((state) => state.getAlbumDetail);
 
+  const contents = album?.contents || album?.tracks || [];
+  const coverHeight = Math.max(140, Math.min(190, height * 0.23));
+
   useEffect(() => {
     let mounted = true;
-  
+
     async function loadAlbum() {
       const albumId = Number(id);
-  
+
       if (!albumId) {
         setLoading(false);
         return;
       }
-  
+
       const cachedAlbum = getAlbumDetail(albumId);
-  
+
       if (cachedAlbum && mounted) {
         setAlbum(cachedAlbum);
       }
-  
+
       try {
         setLoading(!cachedAlbum);
-  
+
         const res = await api.get(`/albums/${albumId}`);
         const payload = res.data?.album || res.data;
-  
+
         if (payload?.id) {
           saveAlbumDetail(payload);
-  
+
           if (mounted) {
             setAlbum(payload);
           }
         }
       } catch (error) {
         console.log("Erro ao carregar álbum. A usar cache local:", error);
-  
+
         if (!cachedAlbum && mounted) {
           setAlbum(null);
         }
@@ -110,9 +112,9 @@ export default function LibraryAlbumDetailScreen() {
         if (mounted) setLoading(false);
       }
     }
-  
+
     loadAlbum();
-  
+
     return () => {
       mounted = false;
     };
@@ -140,15 +142,27 @@ export default function LibraryAlbumDetailScreen() {
   const offlineCount = queue.filter((item) =>
     isTrackOffline(item.contentId)
   ).length;
+
   const allOffline = queue.length > 0 && offlineCount === queue.length;
 
   const handleDownloadAlbum = async () => {
+    if (!queue.length) {
+      Alert.alert("Álbum vazio", "Este álbum ainda não tem faixas.");
+      return;
+    }
+
     try {
       await downloadAlbumOffline(queue);
+      await hydrateOfflineState(queue.map((item) => item.contentId));
+
       Alert.alert("Offline", "Álbum descarregado com sucesso.");
-    } catch (error) {
+    } catch (error: any) {
       console.log("Erro ao descarregar álbum da library:", error);
-      Alert.alert("Erro", "Não foi possível descarregar o álbum.");
+
+      Alert.alert(
+        "Erro",
+        error?.message || "Não foi possível descarregar o álbum."
+      );
     }
   };
 
@@ -156,6 +170,14 @@ export default function LibraryAlbumDetailScreen() {
     try {
       if (currentTrack?.id === item.id) {
         await togglePlayPause();
+        return;
+      }
+
+      if (!isTrackOffline(item.id)) {
+        Alert.alert(
+          "Álbum não descarregado",
+          "Para evitar consumo de internet, a escuta é 100% offline. Descarrega o álbum antes de tocar."
+        );
         return;
       }
 
@@ -248,6 +270,30 @@ export default function LibraryAlbumDetailScreen() {
                 : `Descarregar álbum (${offlineCount}/${queue.length})`}
             </Text>
           </Pressable>
+
+          {downloadAlbumProgress.active ? (
+            <View style={styles.progressBox}>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${downloadAlbumProgress.percent}%` },
+                  ]}
+                />
+              </View>
+
+              <Text style={styles.progressText}>
+                {downloadAlbumProgress.completed}/{downloadAlbumProgress.total}{" "}
+                músicas — {downloadAlbumProgress.percent}%
+              </Text>
+
+              {downloadAlbumProgress.currentTitle ? (
+                <Text style={styles.progressCurrent} numberOfLines={1}>
+                  A descarregar: {downloadAlbumProgress.currentTitle}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.tracksPanel}>
@@ -274,9 +320,10 @@ export default function LibraryAlbumDetailScreen() {
                   style={[
                     styles.trackRow,
                     active && styles.trackRowActive,
+                    !offline && styles.trackRowLocked,
                     isLast && styles.lastTrackRow,
                   ]}
-                  disabled={isLoading && !active}
+                  disabled={(isLoading && !active) || isDownloading}
                 >
                   <View style={styles.trackLeft}>
                     <View
@@ -301,9 +348,11 @@ export default function LibraryAlbumDetailScreen() {
                             : isBuffering
                             ? "A estabilizar..."
                             : isPlaying
-                            ? "A tocar"
+                            ? "A tocar offline"
                             : "Em pausa"
-                          : "Toque para ouvir"}
+                          : offline
+                          ? "Toque para ouvir offline"
+                          : "Descarrega o álbum para ouvir"}
                       </Text>
                     </View>
                   </View>
@@ -318,17 +367,29 @@ export default function LibraryAlbumDetailScreen() {
                         />
                         <Text style={styles.offlineBadgeText}>Offline</Text>
                       </View>
-                    ) : null}
+                    ) : (
+                      <View style={styles.lockedBadge}>
+                        <Ionicons
+                          name="lock-closed-outline"
+                          size={12}
+                          color={colors.white}
+                        />
+                        <Text style={styles.lockedBadgeText}>Bloqueado</Text>
+                      </View>
+                    )}
 
                     <View
                       style={[
                         styles.playIconWrap,
                         active && styles.playIconWrapActive,
+                        !offline && styles.playIconWrapLocked,
                       ]}
                     >
                       <Ionicons
                         name={
-                          active
+                          !offline
+                            ? "download-outline"
+                            : active
                             ? isLoading || isBuffering
                               ? "hourglass-outline"
                               : isPlaying
@@ -465,6 +526,36 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
   },
+  progressBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: colors.yellow,
+  },
+  progressText: {
+    marginTop: 8,
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  progressCurrent: {
+    marginTop: 4,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
   trackRow: {
     minHeight: 62,
     paddingVertical: 10,
@@ -478,6 +569,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     gap: 10,
+  },
+  trackRowLocked: {
+    opacity: 0.72,
   },
   lastTrackRow: {
     marginBottom: 0,
@@ -547,6 +641,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,162,23,0.22)",
     borderColor: "rgba(255,162,23,0.40)",
   },
+  playIconWrapLocked: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
   offlineBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -559,6 +656,22 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   offlineBadgeText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  lockedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  lockedBadgeText: {
     color: colors.white,
     fontSize: 10,
     fontWeight: "700",

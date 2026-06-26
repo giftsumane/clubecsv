@@ -1,7 +1,6 @@
 import {
   ensureOfflinePlayback,
   isOfflineAvailable,
-  preloadPlayback,
   resolvePlayableUri,
 } from "@/services/playback";
 import {
@@ -9,6 +8,7 @@ import {
   setAudioModeAsync,
   type AudioPlayer,
 } from "expo-audio";
+import { Alert } from "react-native";
 import { create } from "zustand";
 
 export type Track = {
@@ -21,8 +21,15 @@ export type Track = {
 };
 
 type UrlCache = Record<number, string>;
-type PendingUrlMap = Partial<Record<number, Promise<string>>>;
 type OfflineMap = Record<number, boolean>;
+
+type DownloadAlbumProgress = {
+  active: boolean;
+  total: number;
+  completed: number;
+  percent: number;
+  currentTitle: string | null;
+};
 
 type PlayerState = {
   currentTrack: Track | null;
@@ -32,6 +39,7 @@ type PlayerState = {
   isLoading: boolean;
   isBuffering: boolean;
   isDownloading: boolean;
+  downloadAlbumProgress: DownloadAlbumProgress;
   player: AudioPlayer | null;
   loadedUrl: string | null;
   playbackToken: number;
@@ -56,7 +64,12 @@ type PlayerState = {
   playPrevious: () => Promise<void>;
   togglePlayPause: () => Promise<void>;
   stopAndReset: () => Promise<void>;
+
+  /**
+   * Compatibilidade com ecrãs antigos. Não faz nada.
+   */
   preloadQueue: (tracks: Track[], aroundIndex?: number) => Promise<void>;
+
   rememberUrl: (contentId: number, url: string) => void;
   markOfflineAvailable: (contentId: number, value?: boolean) => void;
   downloadTrackOffline: (track: Track) => Promise<string | null>;
@@ -74,18 +87,12 @@ let switchChain: Promise<void> = Promise.resolve();
 let playbackSubscription: { remove?: () => void } | null = null;
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
 
-const pendingUrlRequests: PendingUrlMap = {};
-const preloadedContentIds = new Set<number>();
-
 let desiredPlaying = false;
 let lastProgressAt = 0;
 let lastObservedPosition = 0;
 let stallRecoveryAttempts = 0;
 let lastMonitorToken = 0;
 let isRecoveringFromStall = false;
-let lastStatusSignature = "";
-let appWasInterrupted = false;
-let hasStartedPlayback = false;
 
 function nextToken() {
   tokenCounter += 1;
@@ -118,44 +125,6 @@ function normalizeQueue(tracks: Track[]) {
   return tracks.filter((track) => !!track?.contentId);
 }
 
-function normalizePlaybackUrl(url: string): string {
-  let normalized = (url || "").trim();
-
-  if (!normalized) return "";
-
-  if (normalized.startsWith("file://")) {
-    return normalized;
-  }
-
-  normalized = normalized.replace(
-    "https://bilhetes.csveventos.co.mz",
-    "https://csveventos.co.mz"
-  );
-  normalized = normalized.replace(
-    "http://bilhetes.csveventos.co.mz",
-    "https://csveventos.co.mz"
-  );
-  normalized = normalized.replace(
-    "https://www.csveventos.co.mz",
-    "https://csveventos.co.mz"
-  );
-  normalized = normalized.replace(
-    "http://www.csveventos.co.mz",
-    "https://csveventos.co.mz"
-  );
-  normalized = normalized.replace(
-    "http://csveventos.co.mz",
-    "https://csveventos.co.mz"
-  );
-
-  normalized = normalized.replace(
-    "/laravel/storage/app/public/",
-    "/laravel/public/storage/"
-  );
-
-  return normalized;
-}
-
 function safeNumber(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -169,31 +138,27 @@ function enqueueSwitch(task: () => Promise<void>) {
   return switchChain;
 }
 
+function showOfflineRequiredAlert() {
+  Alert.alert(
+    "Álbum não descarregado",
+    "Para evitar consumo de internet, a escuta é 100% offline. Descarrega o álbum antes de tocar."
+  );
+}
+
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
-  if (cache[track.contentId]) {
-    return normalizePlaybackUrl(cache[track.contentId]);
+  const cached = cache[track.contentId];
+
+  if (cached?.startsWith("file://")) {
+    return cached;
   }
 
-  const existing = pendingUrlRequests[track.contentId];
-  if (existing) return existing;
+  const localUri = await resolvePlayableUri(track.contentId);
 
-  const request = resolvePlayableUri(track.contentId, {
-    preferOffline: true,
-  })
-    .then((uri) => {
-      if (!uri) throw new Error("URI vazia para reprodução.");
-      return normalizePlaybackUrl(uri);
-    })
-    .catch((error) => {
-      if (track.url) return normalizePlaybackUrl(track.url);
-      throw error;
-    })
-    .finally(() => {
-      delete pendingUrlRequests[track.contentId];
-    });
+  if (!localUri?.startsWith("file://")) {
+    throw new Error("BLOQUEADO: tentativa de tocar fonte online.");
+  }
 
-  pendingUrlRequests[track.contentId] = request;
-  return request;
+  return localUri;
 }
 
 async function safePauseAndRemove(player: AudioPlayer | null) {
@@ -218,46 +183,6 @@ async function safePauseAndRemove(player: AudioPlayer | null) {
   try {
     player.remove();
   } catch {}
-}
-
-function rememberTrackUrlInState(contentId: number, url: string) {
-  usePlayerStore.getState().rememberUrl(contentId, url);
-}
-
-function maybeLogStatus(payload: {
-  token: number;
-  currentTime: number;
-  totalDuration: number;
-  playing: boolean;
-  buffering: boolean;
-  isLoaded: boolean;
-  desiredPlaying: boolean;
-  didJustFinish: boolean;
-}) {
-  const roundedTime = Math.floor(payload.currentTime * 10) / 10;
-  const signature = [
-    payload.token,
-    roundedTime,
-    payload.playing ? 1 : 0,
-    payload.buffering ? 1 : 0,
-    payload.isLoaded ? 1 : 0,
-    payload.desiredPlaying ? 1 : 0,
-    payload.didJustFinish ? 1 : 0,
-  ].join("|");
-
-  const shouldSkipPausedNoise =
-    !payload.desiredPlaying &&
-    !payload.playing &&
-    !payload.buffering &&
-    payload.isLoaded &&
-    !payload.didJustFinish;
-
-  if (shouldSkipPausedNoise) return;
-  if (signature === lastStatusSignature) return;
-
-  lastStatusSignature = signature;
-
-  console.log("PLAYER STATUS:", payload);
 }
 
 function startMonitor(token: number) {
@@ -295,18 +220,6 @@ function startMonitor(token: number) {
     if (currentTime <= 0) return;
     if (stalledForMs < 6000) return;
 
-    console.log("STALL DETECTED:", {
-      token,
-      currentTime,
-      stalledForMs,
-      stallRecoveryAttempts,
-      track: state.currentTrack.title,
-    });
-
-    const currentTrack = state.currentTrack;
-
-    if (!currentTrack) return;
-
     isRecoveringFromStall = true;
 
     if (stallRecoveryAttempts === 0) {
@@ -319,6 +232,7 @@ function startMonitor(token: number) {
 
       setTimeout(() => {
         const fresh = usePlayerStore.getState();
+
         if (fresh.playbackToken !== token || !fresh.player) {
           isRecoveringFromStall = false;
           return;
@@ -330,17 +244,6 @@ function startMonitor(token: number) {
 
         isRecoveringFromStall = false;
       }, 250);
-
-      return;
-    }
-
-    if (stallRecoveryAttempts === 1) {
-      stallRecoveryAttempts += 1;
-      lastProgressAt = Date.now();
-
-      setTimeout(() => {
-        isRecoveringFromStall = false;
-      }, 1200);
 
       return;
     }
@@ -370,39 +273,12 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     const state = usePlayerStore.getState();
     if (state.playbackToken !== token) return;
 
-    const currentTime = safeNumber(
-      status?.currentTime ?? playerAny.currentTime,
-      0
-    );
-
-    const totalDuration = safeNumber(
-      status?.duration ?? playerAny.duration,
-      0
-    );
-
+    const currentTime = safeNumber(status?.currentTime ?? playerAny.currentTime, 0);
+    const totalDuration = safeNumber(status?.duration ?? playerAny.duration, 0);
     const playing = Boolean(status?.playing ?? playerAny.playing ?? false);
-
-    const buffering = Boolean(
-      status?.isBuffering ?? playerAny.isBuffering ?? false
-    );
-
+    const buffering = Boolean(status?.isBuffering ?? playerAny.isBuffering ?? false);
     const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
     const didJustFinish = Boolean(status?.didJustFinish ?? false);
-
-    if (playing) {
-      hasStartedPlayback = true;
-    }
-
-    maybeLogStatus({
-      token,
-      currentTime,
-      totalDuration,
-      playing,
-      buffering,
-      isLoaded,
-      desiredPlaying,
-      didJustFinish,
-    });
 
     if (currentTime > lastObservedPosition + 0.1) {
       lastObservedPosition = currentTime;
@@ -427,55 +303,26 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       currentTime <= 0.25
     ) {
       clearResumeRetryTimeout();
-    
+
       resumeRetryTimeout = setTimeout(() => {
         const fresh = usePlayerStore.getState();
-    
+
         if (fresh.playbackToken !== token) return;
         if (!desiredPlaying || !fresh.player) return;
-    
+
         try {
-          console.log("FORCE START PLAY RETRY");
           fresh.player.play();
-        } catch (error) {
-          console.log("Erro no retry inicial do play:", error);
-        }
+        } catch {}
       }, 250);
-    
+
       return;
     }
 
     clearResumeRetryTimeout();
 
-    const freshState = usePlayerStore.getState();
-    const nextTrack = freshState.queue[freshState.currentIndex + 1];
-
-    if (
-      nextTrack?.contentId &&
-      !freshState.urlCache[nextTrack.contentId] &&
-      !preloadedContentIds.has(nextTrack.contentId)
-    ) {
-      preloadedContentIds.add(nextTrack.contentId);
-
-      resolveTrackUrl(nextTrack, freshState.urlCache)
-        .then((nextUrl) => {
-          rememberTrackUrlInState(nextTrack.contentId, nextUrl);
-
-          if (nextUrl.startsWith("file://")) {
-            usePlayerStore
-              .getState()
-              .markOfflineAvailable(nextTrack.contentId, true);
-          }
-        })
-        .catch(() => {
-          preloadedContentIds.delete(nextTrack.contentId);
-        });
-    }
-
     if (didJustFinish) {
       clearResumeRetryTimeout();
       clearTransitionTimeout();
-
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
 
@@ -528,15 +375,16 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
             if (nextIndex < 0) return;
 
-            const autoNextTrack = newestState.queue[nextIndex];
+            const nextTrack = newestState.queue[nextIndex];
+            const isOffline = await isOfflineAvailable(nextTrack.contentId);
 
-            if (!autoNextTrack) return;
+            if (!isOffline) {
+              desiredPlaying = false;
+              showOfflineRequiredAlert();
+              return;
+            }
 
-            await newestState.playTrack(
-              autoNextTrack,
-              newestState.queue,
-              nextIndex
-            );
+            await newestState.playTrack(nextTrack, newestState.queue, nextIndex);
           });
         }, 120);
       } else {
@@ -574,11 +422,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
         } catch {}
       },
     };
-
-    return;
   }
-
-  playbackSubscription = null;
 }
 
 async function waitForPlayerReady(token: number, timeoutMs = 8000) {
@@ -605,13 +449,16 @@ async function waitForPlayerReady(token: number, timeoutMs = 8000) {
 
 function activateLockScreen(player: AudioPlayer, track: Track) {
   try {
+    const localArtwork =
+      track.cover_url?.startsWith("file://") ? track.cover_url : undefined;
+
     (player as any).setActiveForLockScreen?.(
       true,
       {
         title: track.title,
         artist: track.artistName || "Clube CSV",
         albumTitle: "Clube CSV",
-        artworkUrl: track.cover_url ?? undefined,
+        artworkUrl: localArtwork,
       },
       {
         isLiveStream: false,
@@ -619,9 +466,7 @@ function activateLockScreen(player: AudioPlayer, track: Track) {
         showSeekForward: true,
       }
     );
-  } catch (error) {
-    console.log("Erro ao activar lockscreen:", error);
-  }
+  } catch {}
 }
 
 function deactivateLockScreen(player: AudioPlayer | null) {
@@ -631,6 +476,7 @@ function deactivateLockScreen(player: AudioPlayer | null) {
     (player as any).setActiveForLockScreen?.(false);
   } catch {}
 }
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   currentTrack: null,
   queue: [],
@@ -639,6 +485,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   isLoading: false,
   isBuffering: false,
   isDownloading: false,
+  downloadAlbumProgress: {
+    active: false,
+    total: 0,
+    completed: 0,
+    percent: 0,
+    currentTitle: null,
+  },
   player: null,
   loadedUrl: null,
   playbackToken: 0,
@@ -651,33 +504,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   toggleRepeatMode: () => {
     const current = get().repeatMode;
-
-    const next =
-      current === "off" ? "one" : current === "one" ? "all" : "off";
-
+    const next = current === "off" ? "one" : current === "one" ? "all" : "off";
     set({ repeatMode: next });
   },
 
   rememberUrl: (contentId, url) => {
-    const normalizedUrl = normalizePlaybackUrl(url);
+    if (!url?.startsWith("file://")) {
+      console.log("BLOQUEADO: tentativa de guardar URL online no player:", url);
+      return;
+    }
 
     set((state) => ({
       urlCache: {
         ...state.urlCache,
-        [contentId]: normalizedUrl,
+        [contentId]: url,
       },
-      offlineMap: normalizedUrl.startsWith("file://")
-        ? {
-            ...state.offlineMap,
-            [contentId]: true,
-          }
-        : state.offlineMap,
+      offlineMap: {
+        ...state.offlineMap,
+        [contentId]: true,
+      },
       queue: state.queue.map((item) =>
-        item.contentId === contentId ? { ...item, url: normalizedUrl } : item
+        item.contentId === contentId ? { ...item, url } : item
       ),
       currentTrack:
         state.currentTrack?.contentId === contentId
-          ? { ...state.currentTrack, url: normalizedUrl }
+          ? { ...state.currentTrack, url }
           : state.currentTrack,
     }));
   },
@@ -697,6 +548,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   hydrateOfflineState: async (contentIds) => {
     const uniqueIds = [...new Set(contentIds.filter(Boolean))];
+
     if (!uniqueIds.length) return;
 
     const entries = await Promise.all(
@@ -746,8 +598,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
 
       return localUri ?? null;
-    } catch (error) {
+    } catch (error: any) {
       console.log("Erro ao descarregar faixa offline:", error);
+      Alert.alert(
+        "Erro no download",
+        error?.message || "Não foi possível descarregar a faixa."
+      );
       return null;
     } finally {
       set({ isDownloading: false });
@@ -758,82 +614,76 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const safeTracks = normalizeQueue(tracks);
     if (!safeTracks.length) return;
 
+    const total = safeTracks.length;
+    let completed = 0;
+
+    const updateProgress = (currentTitle: string | null) => {
+      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      set({
+        downloadAlbumProgress: {
+          active: true,
+          total,
+          completed,
+          percent,
+          currentTitle,
+        },
+      });
+    };
+
     try {
-      set({ isDownloading: true });
+      set({
+        isDownloading: true,
+        downloadAlbumProgress: {
+          active: true,
+          total,
+          completed: 0,
+          percent: 0,
+          currentTitle: safeTracks[0]?.title ?? null,
+        },
+      });
 
       for (const track of safeTracks) {
-        try {
-          const alreadyOffline = await isOfflineAvailable(track.contentId);
+        updateProgress(track.title);
 
-          if (alreadyOffline) {
-            get().markOfflineAvailable(track.contentId, true);
-            continue;
-          }
+        const alreadyOffline = await isOfflineAvailable(track.contentId);
 
-          const localUri = await ensureOfflinePlayback(track.contentId, {
-            forceRefresh: false,
-          });
-
-          if (localUri?.startsWith("file://")) {
-            get().rememberUrl(track.contentId, localUri);
-            get().markOfflineAvailable(track.contentId, true);
-          }
-        } catch (error) {
-          console.log("Erro ao descarregar faixa do álbum:", track.title, error);
+        if (alreadyOffline) {
+          completed += 1;
+          get().markOfflineAvailable(track.contentId, true);
+          updateProgress(track.title);
+          continue;
         }
+
+        const localUri = await ensureOfflinePlayback(track.contentId, {
+          forceRefresh: false,
+        });
+
+        if (localUri?.startsWith("file://")) {
+          get().rememberUrl(track.contentId, localUri);
+          get().markOfflineAvailable(track.contentId, true);
+        }
+
+        completed += 1;
+        updateProgress(track.title);
       }
+
+      set({
+        downloadAlbumProgress: {
+          active: false,
+          total,
+          completed: total,
+          percent: 100,
+          currentTitle: null,
+        },
+      });
     } finally {
       set({ isDownloading: false });
     }
   },
 
-  preloadQueue: async (tracks, aroundIndex = 0) => {
-    const safeTracks = normalizeQueue(tracks);
-    if (!safeTracks.length) return;
-
-    const start = Math.max(0, aroundIndex);
-    const ordered = [
-      ...safeTracks.slice(start, start + 2),
-      ...safeTracks.slice(0, start),
-      ...safeTracks.slice(start + 2),
-    ];
-
-    const uniqueTracks = ordered.filter(
-      (track, index, arr) =>
-        arr.findIndex((item) => item.contentId === track.contentId) === index
-    );
-
-    const idsToWarm = uniqueTracks
-      .slice(0, 2)
-      .map((track) => track.contentId)
-      .filter(
-        (contentId) =>
-          !!contentId &&
-          !get().urlCache[contentId] &&
-          !get().offlineMap[contentId]
-      );
-
-    if (idsToWarm.length) {
-      await preloadPlayback(idsToWarm, {
-        concurrency: 1,
-        delayMs: 180,
-        offline: false,
-      }).catch(() => {});
-    }
-
-    for (const track of uniqueTracks.slice(0, 2)) {
-      if (!track?.contentId) continue;
-      if (get().urlCache[track.contentId]) continue;
-
-      try {
-        const url = await resolveTrackUrl(track, get().urlCache);
-        get().rememberUrl(track.contentId, url);
-
-        if (url.startsWith("file://")) {
-          get().markOfflineAvailable(track.contentId, true);
-        }
-      } catch {}
-    }
+  preloadQueue: async () => {
+    return;
   },
 
   setQueueAndPlay: async (tracks, trackToPlay) => {
@@ -842,6 +692,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     const index = safeTracks.findIndex((t) => t.id === trackToPlay.id);
     const safeIndex = index >= 0 ? index : 0;
+
+    const isOffline = await isOfflineAvailable(safeTracks[safeIndex].contentId);
+
+    if (!isOffline) {
+      showOfflineRequiredAlert();
+      return;
+    }
 
     set({
       queue: safeTracks,
@@ -861,7 +718,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const preservePosition = safeNumber(options?.preservePosition, 0);
 
     desiredPlaying = true;
-    hasStartedPlayback = false;
     clearTransitionTimeout();
     clearResumeRetryTimeout();
     stopMonitor();
@@ -887,12 +743,23 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const playbackUrl = await Promise.race([
         resolveTrackUrl(track, get().urlCache),
         new Promise<string>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Timeout ao resolver reprodução.")),
-            12000
-          )
+          setTimeout(() => reject(new Error("Timeout ao resolver offline.")), 5000)
         ),
       ]);
+
+      if (!playbackUrl.startsWith("file://")) {
+        console.log("BLOQUEADO: tentativa de tocar online:", playbackUrl);
+        showOfflineRequiredAlert();
+
+        set({
+          isLoading: false,
+          isBuffering: false,
+          isPlaying: false,
+          transitionLock: false,
+        });
+
+        return;
+      }
 
       if (get().playbackToken !== token) {
         set({ transitionLock: false });
@@ -916,10 +783,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       get().rememberUrl(track.contentId, playbackUrl);
 
-      if (playbackUrl.startsWith("file://")) {
-        get().markOfflineAvailable(track.contentId, true);
-      }
-
       if (sameTrack && currentPlayer) {
         attachPlaybackListener(currentPlayer, token);
         activateLockScreen(currentPlayer, { ...track, url: playbackUrl });
@@ -942,6 +805,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           } catch {}
         }
 
+        if (!playbackUrl.startsWith("file://")) {
+          console.log("BLOQUEADO ONLINE SAME TRACK:", playbackUrl);
+          throw new Error("BLOQUEADO ONLINE SAME TRACK: " + playbackUrl);
+        }
+
         currentPlayer.play();
 
         lastObservedPosition = Math.max(0, preservePosition || get().position);
@@ -949,7 +817,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         stallRecoveryAttempts = 0;
         startMonitor(token);
 
-        get().preloadQueue(queue, nextIndex + 1).catch(() => {});
         return;
       }
 
@@ -960,12 +827,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         return;
       }
 
-      const isLocalSource = playbackUrl.startsWith("file://");
+      if (!playbackUrl.startsWith("file://")) {
+        console.log("BLOQUEADO ONLINE ANTES DO PLAYER:", playbackUrl);
+        throw new Error("BLOQUEADO ONLINE: " + playbackUrl);
+      }
+
+      console.log("AUDIO SOURCE FINAL:", playbackUrl);
 
       const player = createAudioPlayer(playbackUrl, {
-        updateInterval: 0.25,
-        downloadFirst: isLocalSource,
-        keepAudioSessionActive: true,
+        updateInterval: 1000,
+        downloadFirst: false,
+        keepAudioSessionActive: false,
       });
 
       set({
@@ -1007,35 +879,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         return;
       }
 
-      if (!ready) {
-        set({
-          transitionLock: false,
-          isLoading: true,
-          isBuffering: true,
-          isPlaying: false,
-        });
-
-        lastObservedPosition = Math.max(0, preservePosition);
-        lastProgressAt = Date.now();
-        stallRecoveryAttempts = 0;
-        startMonitor(token);
-        return;
-      }
-
       set({
         transitionLock: false,
-        isLoading: false,
-        isBuffering: false,
-        isPlaying: true,
+        isLoading: !ready,
+        isBuffering: !ready,
+        isPlaying: ready,
       });
 
       lastObservedPosition = Math.max(0, preservePosition || 0);
       lastProgressAt = Date.now();
       stallRecoveryAttempts = 0;
       startMonitor(token);
-
-      get().preloadQueue(queue, nextIndex + 1).catch(() => {});
-    } catch (error) {
+    } catch (error: any) {
       console.log("PLAY TRACK ERROR:", error);
 
       const latestState = get();
@@ -1062,11 +917,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           duration: 0,
           transitionLock: false,
         });
+
+        showOfflineRequiredAlert();
       } else {
         set({ transitionLock: false });
       }
-
-      throw error;
     }
   },
 
@@ -1112,6 +967,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (transitionLock) return;
     if (index < 0 || index >= queue.length) return;
 
+    const isOffline = await isOfflineAvailable(queue[index].contentId);
+
+    if (!isOffline) {
+      showOfflineRequiredAlert();
+      return;
+    }
+
     desiredPlaying = true;
 
     await enqueueSwitch(async () => {
@@ -1151,27 +1013,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
 
+    const isOffline = await isOfflineAvailable(queue[nextIndex].contentId);
+
+    if (!isOffline) {
+      desiredPlaying = false;
+      showOfflineRequiredAlert();
+      return;
+    }
+
     desiredPlaying = true;
 
     await enqueueSwitch(async () => {
       const fresh = get();
       if (fresh.transitionLock) return;
 
-      let safeNextIndex = fresh.currentIndex + 1;
-
-      if (safeNextIndex >= fresh.queue.length) {
-        if (fresh.repeatMode === "all" && fresh.queue.length > 0) {
-          safeNextIndex = 0;
-        } else {
-          return;
-        }
-      }
-
-      await fresh.playTrack(
-        fresh.queue[safeNextIndex],
-        fresh.queue,
-        safeNextIndex
-      );
+      await fresh.playTrack(queue[nextIndex], queue, nextIndex);
     });
   },
 
@@ -1232,27 +1088,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
 
+    const isOffline = await isOfflineAvailable(queue[prevIndex].contentId);
+
+    if (!isOffline) {
+      showOfflineRequiredAlert();
+      return;
+    }
+
     desiredPlaying = true;
 
     await enqueueSwitch(async () => {
       const fresh = get();
       if (fresh.transitionLock) return;
 
-      let safePrevIndex = fresh.currentIndex - 1;
-
-      if (safePrevIndex < 0) {
-        if (fresh.repeatMode === "all" && fresh.queue.length > 0) {
-          safePrevIndex = fresh.queue.length - 1;
-        } else {
-          return;
-        }
-      }
-
-      await fresh.playTrack(
-        fresh.queue[safePrevIndex],
-        fresh.queue,
-        safePrevIndex
-      );
+      await fresh.playTrack(queue[prevIndex], queue, prevIndex);
     });
   },
 
@@ -1260,53 +1109,72 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const player = get().player;
     const currentTrack = get().currentTrack;
     if (!player) return;
-  
+
     try {
       if (get().isLoading && !get().isPlaying) {
         return;
       }
-  
+
       if (desiredPlaying || get().isPlaying || get().isBuffering) {
         desiredPlaying = false;
         clearTransitionTimeout();
         clearResumeRetryTimeout();
         isRecoveringFromStall = false;
         stopMonitor();
-  
+
         try {
           player.pause();
         } catch {}
-  
+
         deactivateLockScreen(player);
-  
+
         set({
           isPlaying: false,
           isBuffering: false,
           isLoading: false,
         });
-  
+
         return;
       }
-  
-      desiredPlaying = true;
-      clearResumeRetryTimeout();
-  
+
       if (currentTrack) {
+        const isOffline = await isOfflineAvailable(currentTrack.contentId);
+
+        if (!isOffline) {
+          showOfflineRequiredAlert();
+          return;
+        }
+
         activateLockScreen(player, currentTrack);
       }
-  
+
+      const loadedUrl = get().loadedUrl;
+
+      if (
+        currentTrack &&
+        loadedUrl &&
+        !loadedUrl.startsWith("file://")
+      ) {
+        console.log("BLOQUEADO ONLINE NO RESUME:", loadedUrl);
+        showOfflineRequiredAlert();
+        return;
+      }
+
+      desiredPlaying = true;
+      clearResumeRetryTimeout();
+
       player.play();
-  
+
       lastProgressAt = Date.now();
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
-  
+
       set({
         isLoading: true,
         isBuffering: false,
         isPlaying: false,
       });
-  
+
       startMonitor(get().playbackToken);
     } catch (error) {
       console.log("Erro ao alternar play/pause:", error);
@@ -1317,7 +1185,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const player = get().player;
 
     desiredPlaying = false;
-    hasStartedPlayback = false;
     clearTransitionTimeout();
     clearResumeRetryTimeout();
     detachPlaybackListener();
@@ -1326,7 +1193,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     stallRecoveryAttempts = 0;
     lastObservedPosition = 0;
     lastProgressAt = 0;
-    lastStatusSignature = "";
 
     deactivateLockScreen(player);
     await safePauseAndRemove(player);
