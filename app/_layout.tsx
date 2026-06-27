@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Linking, Pressable, Text, View } from "react-native";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { registerForPushNotifications } from "@/services/notifications";
 import PlayerBar from "@/src/components/PlayerBar";
+import { checkAppVersion } from "@/src/utils/checkAppVersion";
 
 import {
   DarkTheme,
@@ -17,6 +19,27 @@ import { StatusBar } from "expo-status-bar";
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  const [checkingVersion, setCheckingVersion] = useState(true);
+  const [forceUpdate, setForceUpdate] = useState<any>(null);
+
+  useEffect(() => {
+    async function verifyVersion() {
+      try {
+        const result = await checkAppVersion();
+
+        if (result.mustUpdate) {
+          setForceUpdate(result);
+        }
+      } catch (error) {
+        console.log("Erro ao verificar versão:", error);
+      } finally {
+        setCheckingVersion(false);
+      }
+    }
+
+    verifyVersion();
+  }, []);
+
   useEffect(() => {
     registerForPushNotifications()
       .then((token) => {
@@ -26,6 +49,86 @@ export default function RootLayout() {
         console.log("Erro notificações:", error);
       });
   }, []);
+
+  if (checkingVersion) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#ffffff",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 24,
+        }}
+      >
+        <Text style={{ fontSize: 16, fontWeight: "600", color: "#111827" }}>
+          A verificar versão...
+        </Text>
+      </View>
+    );
+  }
+
+  if (forceUpdate) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#ffffff",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 24,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 26,
+            fontWeight: "900",
+            textAlign: "center",
+            color: "#111827",
+            marginBottom: 12,
+          }}
+        >
+          Actualização obrigatória
+        </Text>
+
+        <Text
+          style={{
+            fontSize: 16,
+            textAlign: "center",
+            color: "#4b5563",
+            lineHeight: 24,
+            marginBottom: 28,
+          }}
+        >
+          {forceUpdate.message ||
+            "Existe uma nova versão do Clube CSV. Actualize para continuar a utilizar a aplicação."}
+        </Text>
+
+        <Pressable
+          onPress={() => Linking.openURL(forceUpdate.storeUrl)}
+          style={{
+            backgroundColor: "#5736B9",
+            paddingVertical: 15,
+            paddingHorizontal: 30,
+            borderRadius: 14,
+            width: "100%",
+            maxWidth: 320,
+          }}
+        >
+          <Text
+            style={{
+              color: "#ffffff",
+              fontSize: 16,
+              fontWeight: "800",
+              textAlign: "center",
+            }}
+          >
+            Actualizar agora
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
