@@ -1,3 +1,7 @@
+import {
+  flushAnalyticsQueue,
+  trackAnalyticsEvent,
+} from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
@@ -56,7 +60,17 @@ export default function HomeScreen() {
   const [isOfflineCache, setIsOfflineCache] = useState(false);
 
   useEffect(() => {
-    fetchHome();
+    void trackAnalyticsEvent({
+      eventType: "app_open",
+      entityType: "page",
+      metadata: {
+        page: "home",
+      },
+    });
+  
+    void flushAnalyticsQueue();
+  
+    void fetchHome();
   }, []);
 
   async function loadCachedHome() {
@@ -125,11 +139,41 @@ export default function HomeScreen() {
   }
 
   function handleNewsPress(item: NewsItem) {
+    void trackAnalyticsEvent({
+      eventType: "news_view",
+      entityType: "news",
+      entityId: item.id,
+      metadata: {
+        title: item.title,
+        artist_name: item.artist_name ?? null,
+        source: item.id === featuredNews?.id ? "featured" : "news_list",
+        has_external_link: Boolean(item.link),
+        offline_cache: isOfflineCache,
+      },
+    });
+  
     router.push(`/news/${item.id}`);
   }
   
-  async function handleOpenLink(link?: string | null) {
+  async function handleOpenLink(
+    link?: string | null,
+    item?: NewsItem
+  ) {
     if (!link) return;
+  
+    if (item) {
+      void trackAnalyticsEvent({
+        eventType: "news_view",
+        entityType: "news",
+        entityId: item.id,
+        metadata: {
+          title: item.title,
+          action: "external_link",
+          external_url: link,
+          offline_cache: isOfflineCache,
+        },
+      });
+    }
   
     try {
       await WebBrowser.openBrowserAsync(link);
@@ -213,7 +257,7 @@ export default function HomeScreen() {
                   <Pressable
                     onPress={(event) => {
                       event.stopPropagation();
-                      handleOpenLink(featuredNews.link);
+                      void handleOpenLink(featuredNews.link, featuredNews);
                     }}
                   >
                     <Text style={styles.externalActionText}>Abrir link externo</Text>

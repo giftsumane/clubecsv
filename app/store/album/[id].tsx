@@ -1,19 +1,20 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { openRealCheckout } from "@/services/checkout";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 type StoreAlbumDetail = {
@@ -50,6 +51,8 @@ export default function AlbumDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState(false);
 
+  const trackedAlbumViewRef = useRef<number | null>(null);
+
   useEffect(() => {
     const fetchAlbumDetail = async () => {
       try {
@@ -68,6 +71,35 @@ export default function AlbumDetailScreen() {
       fetchAlbumDetail();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!album?.id) return;
+  
+    if (trackedAlbumViewRef.current === album.id) {
+      return;
+    }
+  
+    const currentAlbum = album;
+  
+    trackedAlbumViewRef.current = currentAlbum.id;
+  
+    console.log("A preparar album_view da loja:", {
+      albumId: currentAlbum.id,
+      title: currentAlbum.title,
+    });
+  
+    void trackAnalyticsEvent({
+      eventType: "album_view",
+      entityType: "album",
+      entityId: currentAlbum.id,
+      metadata: {
+        album_title: currentAlbum.title,
+        artist_name: currentAlbum.artist_name ?? null,
+        source: "store",
+        price: currentAlbum.price ?? null,
+      },
+    });
+  }, [album]);
 
   const handleBuyAlbum = async () => {
     if (!album?.id) return;

@@ -1,3 +1,4 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import MusicCard from "@/src/components/MusicCard";
@@ -8,7 +9,7 @@ import { colors } from "@/src/theme/colors";
 import type { Album } from "@/src/types";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +25,8 @@ export default function AlbumDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const trackedAlbumViewRef = useRef<number | null>(null);
 
   const saveAlbumDetail = useLibraryStore((state) => state.saveAlbumDetail);
   const getAlbumDetail = useLibraryStore((state) => state.getAlbumDetail);
@@ -95,12 +98,46 @@ export default function AlbumDetailScreen() {
     };
   }, [id, getAlbumDetail, saveAlbumDetail]);
 
+  useEffect(() => {
+    if (!album?.id) return;
+  
+    if (trackedAlbumViewRef.current === album.id) {
+      return;
+    }
+  
+    const currentAlbum = album;
+  
+    trackedAlbumViewRef.current = currentAlbum.id;
+  
+    console.log("A preparar album_view:", {
+      albumId: currentAlbum.id,
+      title: currentAlbum.title,
+    });
+  
+    void trackAnalyticsEvent({
+      eventType: "album_view",
+      entityType: "album",
+      entityId: currentAlbum.id,
+      metadata: {
+        album_title: currentAlbum.title,
+        artist_name: currentAlbum.artist?.name ?? null,
+        source: "library",
+        total_tracks:
+          currentAlbum.tracks?.length ??
+          currentAlbum.contents?.length ??
+          0,
+      },
+    });
+  }, [album]);
+
   const tracks = album?.tracks || album?.contents || [];
 
   const queue = useMemo<Track[]>(() => {
     return tracks.map((track: any) => ({
       id: track.id,
       contentId: track.id,
+      albumId: album?.id ?? null,
+      albumTitle: album?.title ?? null,
       title: track.title,
       url: null,
       cover_url: track.cover_url ?? album?.cover_url ?? null,
@@ -152,6 +189,8 @@ export default function AlbumDetailScreen() {
       const selectedTrack: Track = {
         id: track.id,
         contentId: track.id,
+        albumId: album?.id ?? null,
+        albumTitle: album?.title ?? null,
         title: track.title,
         url: null,
         cover_url: track.cover_url ?? album?.cover_url ?? null,

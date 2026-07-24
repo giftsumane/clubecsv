@@ -1,3 +1,4 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { useLibraryStore } from "@/src/store/libraryStore";
@@ -5,7 +6,7 @@ import { usePlayerStore, type Track } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -47,6 +48,8 @@ export default function LibraryAlbumDetailScreen() {
 
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const trackedAlbumViewRef = useRef<number | null>(null);
 
   const currentTrack = usePlayerStore((state) => state.currentTrack);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
@@ -120,10 +123,46 @@ export default function LibraryAlbumDetailScreen() {
     };
   }, [id, getAlbumDetail, saveAlbumDetail]);
 
+  useEffect(() => {
+    if (!album?.id) {
+      return;
+    }
+  
+    if (trackedAlbumViewRef.current === album.id) {
+      return;
+    }
+  
+    const currentAlbum = album;
+  
+    trackedAlbumViewRef.current = currentAlbum.id;
+  
+    console.log("A preparar album_view da library:", {
+      albumId: currentAlbum.id,
+      title: currentAlbum.title,
+    });
+  
+    void trackAnalyticsEvent({
+      eventType: "album_view",
+      entityType: "album",
+      entityId: currentAlbum.id,
+      metadata: {
+        album_title: currentAlbum.title,
+        artist_name: currentAlbum.artist?.name ?? null,
+        source: "library",
+        total_tracks:
+          currentAlbum.contents?.length ??
+          currentAlbum.tracks?.length ??
+          0,
+      },
+    });
+  }, [album]);
+
   const queue = useMemo<Track[]>(() => {
     return contents.map((item) => ({
       id: item.id,
       contentId: item.id,
+      albumId: album?.id ?? null,
+      albumTitle: album?.title ?? null,
       title: item.title,
       url: null,
       cover_url: item.cover_url ?? album?.cover_url ?? null,
@@ -184,6 +223,8 @@ export default function LibraryAlbumDetailScreen() {
       const track: Track = {
         id: item.id,
         contentId: item.id,
+        albumId: album?.id ?? null,
+        albumTitle: album?.title ?? null,
         title: item.title,
         url: null,
         cover_url: item.cover_url ?? album?.cover_url ?? null,

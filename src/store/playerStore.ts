@@ -1,4 +1,8 @@
 import {
+  createPlaybackUuid,
+  trackAnalyticsEvent,
+} from "@/services/analytics";
+import {
   ensureOfflinePlayback,
   isOfflineAvailable,
   resolvePlayableUri,
@@ -14,6 +18,8 @@ import { create } from "zustand";
 export type Track = {
   id: number;
   contentId: number;
+  albumId?: number | null;
+  albumTitle?: string | null;
   title: string;
   url?: string | null;
   cover_url?: string | null;
@@ -80,6 +86,59 @@ type PlayerState = {
   seekBy: (deltaSeconds: number) => Promise<void>;
 };
 
+function trackDownloadEvent(
+  eventType:
+    | "download_start"
+    | "download_complete"
+    | "download_error",
+  track: Track,
+  metadata?: Record<string, unknown>
+) {
+  void trackAnalyticsEvent({
+    eventType,
+    entityType: "content",
+    entityId: track.contentId,
+    metadata: {
+      track_id: track.id,
+      album_id: track.albumId ?? null,
+      album_title: track.albumTitle ?? null,
+      title: track.title,
+      artist_name: track.artistName ?? null,
+      download_type: "offline",
+      ...metadata,
+    },
+  });
+}
+
+function trackAlbumDownloadEvent(
+  eventType:
+    | "album_download_start"
+    | "album_download_complete"
+    | "album_download_error",
+  tracks: Track[],
+  metadata?: Record<string, unknown>
+) {
+  const firstTrack = tracks[0];
+
+  if (!firstTrack) {
+    return;
+  }
+
+  void trackAnalyticsEvent({
+    eventType,
+    entityType: "album",
+    entityId: firstTrack.albumId ?? undefined,
+    metadata: {
+      album_id: firstTrack.albumId ?? null,
+      album_title: firstTrack.albumTitle ?? null,
+      artist_name: firstTrack.artistName ?? null,
+      total_tracks: tracks.length,
+      download_type: "offline_album",
+      ...metadata,
+    },
+  });
+}
+
 let transitionTimeout: ReturnType<typeof setTimeout> | null = null;
 let resumeRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 let tokenCounter = 0;
@@ -93,6 +152,11 @@ let lastObservedPosition = 0;
 let stallRecoveryAttempts = 0;
 let lastMonitorToken = 0;
 let isRecoveringFromStall = false;
+let currentPlaybackUuid: string | null = null;
+let analyticsStartedForTrack = false;
+let lastAnalyticsProgressPosition = 0;
+
+const ANALYTICS_PROGRESS_INTERVAL_SECONDS = 30;
 
 function nextToken() {
   tokenCounter += 1;
@@ -184,6 +248,133 @@ async function safePauseAndRemove(player: AudioPlayer | null) {
     player.remove();
   } catch {}
 }
+/* ========================== FUNCOES DE ANALITYCS ========================== */
+function resetPlaybackAnalytics() {
+  currentPlaybackUuid = null;
+  analyticsStartedForTrack = false;
+  lastAnalyticsProgressPosition = 0;
+}
+
+function beginPlaybackAnalytics(track: Track, position = 0) {
+  currentPlaybackUuid = createPlaybackUuid();
+  analyticsStartedForTrack = false;
+  lastAnalyticsProgressPosition = Math.max(0, position);
+}
+
+function getPlaybackAnalyticsUuid() {
+  if (!currentPlaybackUuid) {
+    currentPlaybackUuid = createPlaybackUuid();
+  }
+
+  return currentPlaybackUuid;
+}
+
+function trackMusicStart(
+  track: Track,
+  position: number,
+  duration: number
+) {
+  if (analyticsStartedForTrack) return;
+
+  analyticsStartedForTrack = true;
+  lastAnalyticsProgressPosition = Math.max(0, position);
+
+  void trackAnalyticsEvent({
+    eventType: "music_start",
+    playbackUuid: getPlaybackAnalyticsUuid(),
+    entityType: "content",
+    entityId: track.contentId,
+    positionSeconds: position,
+    durationSeconds: duration,
+    metadata: {
+      track_id: track.id,
+      title: track.title,
+      artist_name: track.artistName ?? null,
+      source: "offline",
+    },
+  });
+}
+
+function trackMusicProgress(
+  track: Track,
+  position: number,
+  duration: number
+) {
+  if (!analyticsStartedForTrack) return;
+
+  const safePosition = Math.max(0, position);
+
+  if (
+    safePosition - lastAnalyticsProgressPosition <
+    ANALYTICS_PROGRESS_INTERVAL_SECONDS
+  ) {
+    return;
+  }
+
+  const listenedSinceLastEvent = Math.max(
+    0,
+    safePosition - lastAnalyticsProgressPosition
+  );
+
+  lastAnalyticsProgressPosition = safePosition;
+
+  void trackAnalyticsEvent({
+    eventType: "music_progress",
+    playbackUuid: getPlaybackAnalyticsUuid(),
+    entityType: "content",
+    entityId: track.contentId,
+    positionSeconds: safePosition,
+    durationSeconds: duration,
+    listenedSeconds: listenedSinceLastEvent,
+    metadata: {
+      track_id: track.id,
+      title: track.title,
+      artist_name: track.artistName ?? null,
+      source: "offline",
+    },
+  });
+}
+
+function trackMusicEnd(
+  eventType:
+    | "music_pause"
+    | "music_skip"
+    | "music_complete"
+    | "music_error",
+  track: Track,
+  position: number,
+  duration: number,
+  metadata?: Record<string, unknown>
+) {
+  const safePosition = Math.max(0, position);
+  const listenedSinceLastEvent = Math.max(
+    0,
+    safePosition - lastAnalyticsProgressPosition
+  );
+
+  lastAnalyticsProgressPosition = safePosition;
+
+  void trackAnalyticsEvent({
+    eventType,
+    playbackUuid: getPlaybackAnalyticsUuid(),
+    entityType: "content",
+    entityId: track.contentId,
+    positionSeconds: safePosition,
+    durationSeconds: duration,
+    listenedSeconds: listenedSinceLastEvent,
+    metadata: {
+      track_id: track.id,
+      title: track.title,
+      artist_name: track.artistName ?? null,
+      source: "offline",
+      ...metadata,
+    },
+  });
+}
+
+ 
+//=========================================================
+
 
 function startMonitor(token: number) {
   stopMonitor();
@@ -297,6 +488,25 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     if (
       desiredPlaying &&
       isLoaded &&
+      playing &&
+      state.currentTrack
+    ) {
+      trackMusicStart(
+        state.currentTrack,
+        currentTime,
+        totalDuration
+      );
+    
+      trackMusicProgress(
+        state.currentTrack,
+        currentTime,
+        totalDuration
+      );
+    }
+
+    if (
+      desiredPlaying &&
+      isLoaded &&
       !playing &&
       !buffering &&
       !didJustFinish &&
@@ -327,6 +537,19 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       isRecoveringFromStall = false;
 
       const latestState = usePlayerStore.getState();
+
+      if (latestState.currentTrack) {
+        trackMusicEnd(
+          "music_complete",
+          latestState.currentTrack,
+          totalDuration > 0 ? totalDuration : currentTime,
+          totalDuration,
+          {
+            completed_naturally: true,
+            repeat_mode: latestState.repeatMode,
+          }
+        );
+      }
 
       if (latestState.repeatMode === "one" && latestState.currentTrack) {
         transitionTimeout = setTimeout(() => {
@@ -584,26 +807,94 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   downloadTrackOffline: async (track) => {
     if (!track?.contentId) return null;
-
+  
+    const startedAt = Date.now();
+  
     try {
       set({ isDownloading: true });
-
-      const localUri = await ensureOfflinePlayback(track.contentId, {
-        forceRefresh: false,
-      });
-
+  
+      const alreadyOffline = await isOfflineAvailable(
+        track.contentId
+      );
+  
+      if (alreadyOffline) {
+        get().markOfflineAvailable(track.contentId, true);
+  
+        trackDownloadEvent(
+          "download_complete",
+          track,
+          {
+            already_downloaded: true,
+            duration_ms: 0,
+            source: "single_track",
+          }
+        );
+  
+        return (
+          get().urlCache[track.contentId] ??
+          (await resolvePlayableUri(track.contentId))
+        );
+      }
+  
+      trackDownloadEvent(
+        "download_start",
+        track,
+        {
+          source: "single_track",
+        }
+      );
+  
+      const localUri = await ensureOfflinePlayback(
+        track.contentId,
+        {
+          forceRefresh: false,
+        }
+      );
+  
       if (localUri?.startsWith("file://")) {
         get().rememberUrl(track.contentId, localUri);
-        get().markOfflineAvailable(track.contentId, true);
+        get().markOfflineAvailable(
+          track.contentId,
+          true
+        );
       }
-
+  
+      trackDownloadEvent(
+        "download_complete",
+        track,
+        {
+          already_downloaded: false,
+          duration_ms: Date.now() - startedAt,
+          source: "single_track",
+        }
+      );
+  
       return localUri ?? null;
     } catch (error: any) {
-      console.log("Erro ao descarregar faixa offline:", error);
+      console.log(
+        "Erro ao descarregar faixa offline:",
+        error
+      );
+  
+      trackDownloadEvent(
+        "download_error",
+        track,
+        {
+          source: "single_track",
+          duration_ms: Date.now() - startedAt,
+          error_message:
+            typeof error?.message === "string"
+              ? error.message
+              : "Erro desconhecido",
+        }
+      );
+  
       Alert.alert(
         "Erro no download",
-        error?.message || "Não foi possível descarregar a faixa."
+        error?.message ||
+          "Não foi possível descarregar a faixa."
       );
+  
       return null;
     } finally {
       set({ isDownloading: false });
@@ -613,13 +904,23 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   downloadAlbumOffline: async (tracks) => {
     const safeTracks = normalizeQueue(tracks);
     if (!safeTracks.length) return;
-
+  
     const total = safeTracks.length;
+    const startedAt = Date.now();
+  
     let completed = 0;
-
-    const updateProgress = (currentTitle: string | null) => {
-      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-
+    let downloaded = 0;
+    let alreadyDownloaded = 0;
+    let failed = 0;
+  
+    const updateProgress = (
+      currentTitle: string | null
+    ) => {
+      const percent =
+        total > 0
+          ? Math.round((completed / total) * 100)
+          : 0;
+  
       set({
         downloadAlbumProgress: {
           active: true,
@@ -630,7 +931,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         },
       });
     };
-
+  
+    trackAlbumDownloadEvent(
+      "album_download_start",
+      safeTracks,
+      {
+        source: "album_button",
+      }
+    );
+  
     try {
       set({
         isDownloading: true,
@@ -639,46 +948,210 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           total,
           completed: 0,
           percent: 0,
-          currentTitle: safeTracks[0]?.title ?? null,
+          currentTitle:
+            safeTracks[0]?.title ?? null,
         },
       });
-
+  
       for (const track of safeTracks) {
         updateProgress(track.title);
-
-        const alreadyOffline = await isOfflineAvailable(track.contentId);
-
-        if (alreadyOffline) {
+  
+        const trackStartedAt = Date.now();
+  
+        try {
+          const alreadyOffline =
+            await isOfflineAvailable(
+              track.contentId
+            );
+  
+          if (alreadyOffline) {
+            alreadyDownloaded += 1;
+            completed += 1;
+  
+            get().markOfflineAvailable(
+              track.contentId,
+              true
+            );
+  
+            trackDownloadEvent(
+              "download_complete",
+              track,
+              {
+                source: "album_download",
+                album_id:
+                  track.albumId ?? null,
+                already_downloaded: true,
+                duration_ms: 0,
+              }
+            );
+  
+            updateProgress(track.title);
+            continue;
+          }
+  
+          trackDownloadEvent(
+            "download_start",
+            track,
+            {
+              source: "album_download",
+              album_id:
+                track.albumId ?? null,
+            }
+          );
+  
+          const localUri =
+            await ensureOfflinePlayback(
+              track.contentId,
+              {
+                forceRefresh: false,
+              }
+            );
+  
+          if (localUri?.startsWith("file://")) {
+            get().rememberUrl(
+              track.contentId,
+              localUri
+            );
+  
+            get().markOfflineAvailable(
+              track.contentId,
+              true
+            );
+          }
+  
+          downloaded += 1;
           completed += 1;
-          get().markOfflineAvailable(track.contentId, true);
+  
+          trackDownloadEvent(
+            "download_complete",
+            track,
+            {
+              source: "album_download",
+              album_id:
+                track.albumId ?? null,
+              already_downloaded: false,
+              duration_ms:
+                Date.now() - trackStartedAt,
+            }
+          );
+  
           updateProgress(track.title);
-          continue;
+        } catch (error: any) {
+          failed += 1;
+          completed += 1;
+  
+          trackDownloadEvent(
+            "download_error",
+            track,
+            {
+              source: "album_download",
+              album_id:
+                track.albumId ?? null,
+              duration_ms:
+                Date.now() - trackStartedAt,
+              error_message:
+                typeof error?.message === "string"
+                  ? error.message
+                  : "Erro desconhecido",
+            }
+          );
+  
+          updateProgress(track.title);
         }
-
-        const localUri = await ensureOfflinePlayback(track.contentId, {
-          forceRefresh: false,
-        });
-
-        if (localUri?.startsWith("file://")) {
-          get().rememberUrl(track.contentId, localUri);
-          get().markOfflineAvailable(track.contentId, true);
-        }
-
-        completed += 1;
-        updateProgress(track.title);
       }
-
+  
       set({
         downloadAlbumProgress: {
           active: false,
           total,
-          completed: total,
+          completed,
           percent: 100,
           currentTitle: null,
         },
       });
+  
+      if (failed > 0) {
+        trackAlbumDownloadEvent(
+          "album_download_error",
+          safeTracks,
+          {
+            source: "album_button",
+            downloaded_tracks: downloaded,
+            already_downloaded_tracks:
+              alreadyDownloaded,
+            failed_tracks: failed,
+            duration_ms:
+              Date.now() - startedAt,
+          }
+        );
+  
+        Alert.alert(
+          "Download parcialmente concluído",
+          `${completed - failed} de ${total} faixas foram preparadas para escuta offline.`
+        );
+  
+        return;
+      }
+  
+      trackAlbumDownloadEvent(
+        "album_download_complete",
+        safeTracks,
+        {
+          source: "album_button",
+          downloaded_tracks: downloaded,
+          already_downloaded_tracks:
+            alreadyDownloaded,
+          failed_tracks: 0,
+          duration_ms:
+            Date.now() - startedAt,
+        }
+      );
+    } catch (error: any) {
+      trackAlbumDownloadEvent(
+        "album_download_error",
+        safeTracks,
+        {
+          source: "album_button",
+          downloaded_tracks: downloaded,
+          already_downloaded_tracks:
+            alreadyDownloaded,
+          failed_tracks:
+            failed || total - completed,
+          duration_ms:
+            Date.now() - startedAt,
+          error_message:
+            typeof error?.message === "string"
+              ? error.message
+              : "Erro desconhecido",
+        }
+      );
+  
+      console.log(
+        "Erro ao descarregar álbum:",
+        error
+      );
+  
+      Alert.alert(
+        "Erro no download",
+        error?.message ||
+          "Não foi possível descarregar o álbum."
+      );
     } finally {
-      set({ isDownloading: false });
+      set({
+        isDownloading: false,
+        downloadAlbumProgress: {
+          active: false,
+          total,
+          completed,
+          percent:
+            total > 0
+              ? Math.round(
+                  (completed / total) * 100
+                )
+              : 0,
+          currentTitle: null,
+        },
+      });
     }
   },
 
@@ -716,6 +1189,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const queue = normalizeQueue(queueOverride ?? state.queue);
     const forceReload = Boolean(options?.forceReload);
     const preservePosition = safeNumber(options?.preservePosition, 0);
+
+    const previousTrack = state.currentTrack;
+    const isSameContent =
+      previousTrack?.contentId === track.contentId;
+
+    if (!isSameContent || forceReload) {
+      beginPlaybackAnalytics(track, preservePosition);
+    } else if (!currentPlaybackUuid) {
+      beginPlaybackAnalytics(track, preservePosition);
+    }
 
     desiredPlaying = true;
     clearTransitionTimeout();
@@ -812,6 +1295,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         currentPlayer.play();
 
+        trackMusicStart(
+          track,
+          preservePosition > 0
+            ? preservePosition
+            : get().position,
+          get().duration
+        );
+
         lastObservedPosition = Math.max(0, preservePosition || get().position);
         lastProgressAt = Date.now();
         stallRecoveryAttempts = 0;
@@ -886,12 +1377,37 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         isPlaying: ready,
       });
 
+      if (ready) {
+        const analyticsState = get();
+      
+        if (analyticsState.currentTrack) {
+          trackMusicStart(
+            analyticsState.currentTrack,
+            analyticsState.position,
+            analyticsState.duration
+          );
+        }
+      }
+
       lastObservedPosition = Math.max(0, preservePosition || 0);
       lastProgressAt = Date.now();
       stallRecoveryAttempts = 0;
       startMonitor(token);
     } catch (error: any) {
       console.log("PLAY TRACK ERROR:", error);
+
+      trackMusicEnd(
+        "music_error",
+        track,
+        get().position,
+        get().duration,
+        {
+          error_message:
+            typeof error?.message === "string"
+              ? error.message
+              : "Erro desconhecido",
+        }
+      );
 
       const latestState = get();
       const isStillActive = latestState.playbackToken === token;
@@ -989,6 +1505,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const { queue, currentIndex, transitionLock, repeatMode } = get();
     if (transitionLock) return;
 
+    const skippedTrack = get().currentTrack;
+
+    if (skippedTrack) {
+      trackMusicEnd(
+        "music_skip",
+        skippedTrack,
+        get().position,
+        get().duration,
+        {
+          direction: "next",
+          initiated_by: "user",
+        }
+      );
+    }
+
     let nextIndex = currentIndex + 1;
 
     if (nextIndex >= queue.length) {
@@ -1050,6 +1581,24 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       clearResumeRetryTimeout();
 
       try {
+        if (currentTrack) {
+          void trackAnalyticsEvent({
+            eventType: "music_skip",
+            playbackUuid: getPlaybackAnalyticsUuid(),
+            entityType: "content",
+            entityId: currentTrack.contentId,
+            positionSeconds: position,
+            durationSeconds: get().duration,
+            metadata: {
+              track_id: currentTrack.id,
+              title: currentTrack.title,
+              direction: "restart",
+              initiated_by: "user",
+            },
+          });
+        
+          lastAnalyticsProgressPosition = 0;
+        }
         player.seekTo(0);
         activateLockScreen(
           player,
@@ -1078,6 +1627,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
 
+    
+
     let prevIndex = currentIndex - 1;
 
     if (prevIndex < 0) {
@@ -1086,6 +1637,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       } else {
         return;
       }
+    }
+
+    if (currentTrack) {
+      trackMusicEnd(
+        "music_skip",
+        currentTrack,
+        position,
+        get().duration,
+        {
+          direction: "previous",
+          initiated_by: "user",
+        }
+      );
     }
 
     const isOffline = await isOfflineAvailable(queue[prevIndex].contentId);
@@ -1116,6 +1680,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
 
       if (desiredPlaying || get().isPlaying || get().isBuffering) {
+        if (currentTrack) {
+          trackMusicEnd(
+            "music_pause",
+            currentTrack,
+            get().position,
+            get().duration,
+            {
+              action: "manual_pause",
+            }
+          );
+        }
         desiredPlaying = false;
         clearTransitionTimeout();
         clearResumeRetryTimeout();
@@ -1165,6 +1740,28 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
       player.play();
 
+      if (currentTrack) {
+        lastAnalyticsProgressPosition = Math.max(
+          0,
+          get().position
+        );
+      
+        void trackAnalyticsEvent({
+          eventType: "music_resume",
+          playbackUuid: getPlaybackAnalyticsUuid(),
+          entityType: "content",
+          entityId: currentTrack.contentId,
+          positionSeconds: get().position,
+          durationSeconds: get().duration,
+          metadata: {
+            track_id: currentTrack.id,
+            title: currentTrack.title,
+            artist_name: currentTrack.artistName ?? null,
+            source: "offline",
+          },
+        });
+      }
+
       lastProgressAt = Date.now();
       stallRecoveryAttempts = 0;
       isRecoveringFromStall = false;
@@ -1183,6 +1780,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   stopAndReset: async () => {
     const player = get().player;
+
+    const currentTrack = get().currentTrack;
+
+    if (currentTrack) {
+      trackMusicEnd(
+        "music_skip",
+        currentTrack,
+        get().position,
+        get().duration,
+        {
+          direction: "stop",
+          initiated_by: "user",
+        }
+      );
+    }
 
     desiredPlaying = false;
     clearTransitionTimeout();
@@ -1211,5 +1823,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       duration: 0,
       transitionLock: false,
     });
+    resetPlaybackAnalytics();
   },
 }));
