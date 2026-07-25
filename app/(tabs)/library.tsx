@@ -1,3 +1,4 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import AppGradient from "@/src/components/AppGradient";
 import { useLibraryStore } from "@/src/store/libraryStore";
 import { colors } from "@/src/theme/colors";
@@ -71,6 +72,26 @@ export default function LibraryScreen() {
 
   const showFullLoader = loading && data.length === 0;
 
+  function handleItemPress(item: LibraryItem) {
+    void trackAnalyticsEvent({
+      eventType: item.itemType === "album" ? "album_view" : "content_view",
+      entityType: item.itemType === "album" ? "album" : "content",
+      entityId: item.id,
+      metadata: {
+        title: item.title,
+        artist_name: item.artist?.name ?? null,
+        source: "library_grid",
+        item_type: item.itemType,
+      },
+    });
+
+    if (item.itemType === "album") {
+      router.push(`/library/album/${item.id}`);
+    } else {
+      router.push(`/library/content/${item.id}`);
+    }
+  }
+
   if (showFullLoader) {
     return (
       <AppGradient>
@@ -111,13 +132,7 @@ export default function LibraryScreen() {
           renderItem={({ item }) => (
             <Pressable
               style={styles.card}
-              onPress={() => {
-                if (item.itemType === "album") {
-                  router.push(`/library/album/${item.id}`);
-                } else {
-                  router.push(`/library/content/${item.id}`);
-                }
-              }}
+              onPress={() => handleItemPress(item)}
             >
               {item.cover_url ? (
                 <Image source={{ uri: item.cover_url }} style={styles.cover} />

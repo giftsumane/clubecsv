@@ -3,8 +3,12 @@ import { Linking, Pressable, Text, View } from "react-native";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { registerForPushNotifications } from "@/services/notifications";
+import {
+  addNotificationResponseListener,
+  registerForPushNotifications,
+} from "@/services/notifications";
 import PlayerBar from "@/src/components/PlayerBar";
+import { useAuthStore } from "@/src/store/authStore";
 import { checkAppVersion } from "@/src/utils/checkAppVersion";
 
 import {
@@ -18,6 +22,8 @@ import { StatusBar } from "expo-status-bar";
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const hasHydratedAuth = useAuthStore((state) => state.hasHydrated);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   const [checkingVersion, setCheckingVersion] = useState(true);
   const [forceUpdate, setForceUpdate] = useState<any>(null);
@@ -41,6 +47,16 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    const subscription = addNotificationResponseListener();
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedAuth) return;
+
     registerForPushNotifications()
       .then((token) => {
         console.log("PUSH TOKEN:", token);
@@ -48,7 +64,7 @@ export default function RootLayout() {
       .catch((error) => {
         console.log("Erro notificações:", error);
       });
-  }, []);
+  }, [hasHydratedAuth, isAuthenticated]);
 
   if (checkingVersion) {
     return (

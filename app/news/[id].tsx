@@ -1,10 +1,11 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -45,6 +46,7 @@ export default function NewsDetailScreen() {
 
   const [news, setNews] = useState<NewsDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const trackedNewsViewRef = useRef<number | null>(null);
 
   useEffect(() => {
     const fetchNewsDetail = async () => {
@@ -67,8 +69,43 @@ export default function NewsDetailScreen() {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (!news?.id) return;
+
+    if (trackedNewsViewRef.current === news.id) {
+      return;
+    }
+
+    trackedNewsViewRef.current = news.id;
+
+    void trackAnalyticsEvent({
+      eventType: "news_view",
+      entityType: "news",
+      entityId: news.id,
+      metadata: {
+        title: news.title,
+        artist_name: news.artist_name ?? null,
+        source: "news_detail",
+        has_external_link: Boolean(news.link),
+        published_at: news.published_at ?? null,
+      },
+    });
+  }, [news]);
+
   async function handleOpenLink() {
     if (!news?.link) return;
+
+    void trackAnalyticsEvent({
+      eventType: "news_view",
+      entityType: "news",
+      entityId: news.id,
+      metadata: {
+        title: news.title,
+        action: "external_link",
+        external_url: news.link,
+        source: "news_detail",
+      },
+    });
 
     try {
       await WebBrowser.openBrowserAsync(news.link);

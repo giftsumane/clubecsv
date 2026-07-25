@@ -16,6 +16,7 @@ export type AnalyticsEventType =
   | "app_open"
   | "news_view"
   | "album_view"
+  | "content_view"
   | "music_start"
   | "music_progress"
   | "music_pause"

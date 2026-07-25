@@ -32,6 +32,10 @@ export default function PlayerScreen() {
   const duration = usePlayerStore((state) => state.duration);
   const currentIndex = usePlayerStore((state) => state.currentIndex);
   const queue = usePlayerStore((state) => state.queue);
+  const repeatMode = usePlayerStore((state) => state.repeatMode);
+  const shuffleEnabled = usePlayerStore((state) => state.shuffleEnabled);
+  const toggleRepeatMode = usePlayerStore((state) => state.toggleRepeatMode);
+  const toggleShuffle = usePlayerStore((state) => state.toggleShuffle);
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const playNext = usePlayerStore((state) => state.playNext);
   const playPrevious = usePlayerStore((state) => state.playPrevious);
@@ -39,8 +43,11 @@ export default function PlayerScreen() {
   const playFromQueueIndex = usePlayerStore((state) => state.playFromQueueIndex);
   const seekBy = usePlayerStore((state) => state.seekBy);
 
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < queue.length - 1;
+  const hasPrev = repeatMode === "all" ? queue.length > 1 : currentIndex > 0;
+  const hasNext =
+    shuffleEnabled || repeatMode === "all"
+      ? queue.length > 1
+      : currentIndex >= 0 && currentIndex < queue.length - 1;
   const safePosition = Math.max(0, position || 0);
   const safeDuration = Math.max(0, duration || 0);
   const progress =
@@ -62,6 +69,16 @@ export default function PlayerScreen() {
       : isPlaying
       ? "pause"
       : "play";
+
+  const repeatIconColor =
+    repeatMode === "off" ? "rgba(255,255,255,0.48)" : colors.yellow;
+
+  const repeatLabel =
+    repeatMode === "one" ? "1" : repeatMode === "all" ? "∞" : "";
+
+  const shuffleIconColor = shuffleEnabled
+    ? colors.yellow
+    : "rgba(255,255,255,0.48)";
 
   const upcomingTracks =
     currentIndex >= 0 ? queue.slice(currentIndex + 1, currentIndex + 6) : [];
@@ -112,6 +129,34 @@ export default function PlayerScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.mainTop}>
+            <View style={styles.modeRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modeButton,
+                  shuffleEnabled && styles.modeButtonActive,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={toggleShuffle}
+              >
+                <Ionicons name="shuffle" size={19} color={shuffleIconColor} />
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.modeButton,
+                  repeatMode !== "off" && styles.modeButtonActive,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={toggleRepeatMode}
+              >
+                <Ionicons name="repeat" size={19} color={repeatIconColor} />
+
+                {!!repeatLabel && (
+                  <Text style={styles.repeatLabel}>{repeatLabel}</Text>
+                )}
+              </Pressable>
+            </View>
+
             {currentTrack.cover_url ? (
               <Image
                 source={{ uri: currentTrack.cover_url }}
@@ -346,6 +391,35 @@ const styles = StyleSheet.create({
   mainTop: {
     alignItems: "center",
     paddingTop: 8,
+  },
+  modeRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginBottom: 12,
+  },
+  modeButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modeButtonActive: {
+    backgroundColor: "rgba(255,214,10,0.14)",
+    borderColor: "rgba(255,214,10,0.36)",
+  },
+  repeatLabel: {
+    position: "absolute",
+    top: 4,
+    right: 8,
+    color: colors.yellow,
+    fontSize: 10,
+    fontWeight: "900",
   },
   cover: {
     borderRadius: 28,

@@ -12,6 +12,7 @@ import {
   setAudioModeAsync,
   type AudioPlayer,
 } from "expo-audio";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Alert } from "react-native";
 import { create } from "zustand";
 
@@ -28,6 +29,20 @@ export type Track = {
 
 type UrlCache = Record<number, string>;
 type OfflineMap = Record<number, boolean>;
+
+type ShuffleProfileEntry = {
+  contentId: number;
+  score: number;
+  plays: number;
+  completes: number;
+  earlySkips: number;
+  lateSkips: number;
+  restarts: number;
+  lastPlayedAt: number;
+  updatedAt: number;
+};
+
+type ShuffleProfile = Record<number, ShuffleProfileEntry>;
 
 type DownloadAlbumProgress = {
   active: boolean;
@@ -55,7 +70,9 @@ type PlayerState = {
   offlineMap: OfflineMap;
   transitionLock: boolean;
   repeatMode: "off" | "one" | "all";
+  shuffleEnabled: boolean;
   toggleRepeatMode: () => void;
+  toggleShuffle: () => void;
 
   setQueue: (tracks: Track[], startIndex?: number) => void;
   setQueueAndPlay: (tracks: Track[], trackToPlay: Track) => Promise<void>;
@@ -155,8 +172,19 @@ let isRecoveringFromStall = false;
 let currentPlaybackUuid: string | null = null;
 let analyticsStartedForTrack = false;
 let lastAnalyticsProgressPosition = 0;
+let playbackCommandStartedAt = 0;
 
 const ANALYTICS_PROGRESS_INTERVAL_SECONDS = 30;
+const STARTUP_RESUME_WINDOW_MS = 2500;
+const SMART_SHUFFLE_PROFILE_KEY = "player_smart_shuffle_profile_v1";
+const SMART_SHUFFLE_RECENT_WINDOW_MS = 30 * 60 * 1000;
+const SMART_SHUFFLE_MIN_WEIGHT = 0.12;
+const SMART_SHUFFLE_MAX_WEIGHT = 8;
+
+let smartShuffleProfile: ShuffleProfile = {};
+let smartShuffleProfileLoaded = false;
+let smartShuffleProfileLoading: Promise<ShuffleProfile> | null = null;
+let smartShuffleSaveChain: Promise<void> = Promise.resolve();
 
 function nextToken() {
   tokenCounter += 1;
@@ -207,6 +235,242 @@ function showOfflineRequiredAlert() {
     "Álbum não descarregado",
     "Para evitar consumo de internet, a escuta é 100% offline. Descarrega o álbum antes de tocar."
   );
+}
+
+function markPlaybackCommandStarted() {
+  playbackCommandStartedAt = Date.now();
+}
+
+function isInStartupResumeWindow() {
+  return Date.now() - playbackCommandStartedAt < STARTUP_RESUME_WINDOW_MS;
+}
+
+function getRandomQueueIndex(queueLength: number, currentIndex: number) {
+  if (queueLength <= 0) return -1;
+  if (queueLength === 1) return currentIndex >= 0 ? currentIndex : 0;
+
+  let nextIndex = Math.floor(Math.random() * queueLength);
+
+  if (nextIndex === currentIndex) {
+    nextIndex = (nextIndex + 1) % queueLength;
+  }
+
+  return nextIndex;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+async function loadSmartShuffleProfile() {
+  if (smartShuffleProfileLoaded) return smartShuffleProfile;
+  if (smartShuffleProfileLoading) return smartShuffleProfileLoading;
+
+  smartShuffleProfileLoading = (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(SMART_SHUFFLE_PROFILE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+
+      if (parsed && typeof parsed === "object") {
+        smartShuffleProfile = parsed as ShuffleProfile;
+      }
+    } catch {
+      smartShuffleProfile = {};
+    }
+
+    smartShuffleProfileLoaded = true;
+    smartShuffleProfileLoading = null;
+    return smartShuffleProfile;
+  })();
+
+  return smartShuffleProfileLoading;
+}
+
+function persistSmartShuffleProfile() {
+  if (!smartShuffleProfileLoaded) return;
+
+  smartShuffleSaveChain = smartShuffleSaveChain.catch(() => {}).then(async () => {
+    await AsyncStorage.setItem(
+      SMART_SHUFFLE_PROFILE_KEY,
+      JSON.stringify(smartShuffleProfile)
+    );
+  });
+}
+
+function getSmartShuffleEntry(contentId: number): ShuffleProfileEntry {
+  const existing = smartShuffleProfile[contentId];
+
+  if (existing) return existing;
+
+  const entry: ShuffleProfileEntry = {
+    contentId,
+    score: 1,
+    plays: 0,
+    completes: 0,
+    earlySkips: 0,
+    lateSkips: 0,
+    restarts: 0,
+    lastPlayedAt: 0,
+    updatedAt: Date.now(),
+  };
+
+  smartShuffleProfile[contentId] = entry;
+  return entry;
+}
+
+function learnSmartShuffle(
+  track: Track | null,
+  signal: "play" | "complete" | "early_skip" | "late_skip" | "restart"
+) {
+  if (!track?.contentId) return;
+
+  void loadSmartShuffleProfile().then(() => {
+    const entry = getSmartShuffleEntry(track.contentId);
+    const now = Date.now();
+
+    if (signal === "play") {
+      entry.plays += 1;
+      entry.lastPlayedAt = now;
+      entry.score += 0.08;
+    } else if (signal === "complete") {
+      entry.completes += 1;
+      entry.score += 0.65;
+    } else if (signal === "early_skip") {
+      entry.earlySkips += 1;
+      entry.score -= 0.75;
+    } else if (signal === "late_skip") {
+      entry.lateSkips += 1;
+      entry.score -= 0.18;
+    } else if (signal === "restart") {
+      entry.restarts += 1;
+      entry.score += 0.9;
+      entry.lastPlayedAt = now;
+    }
+
+    entry.score = clamp(entry.score, SMART_SHUFFLE_MIN_WEIGHT, SMART_SHUFFLE_MAX_WEIGHT);
+    entry.updatedAt = now;
+
+    persistSmartShuffleProfile();
+  });
+}
+
+function getSkipSignal(position: number, duration: number) {
+  const safePosition = Math.max(0, position);
+  const safeDuration = Math.max(0, duration);
+  const earlySkipLimit =
+    safeDuration > 0 ? Math.min(45, Math.max(12, safeDuration * 0.25)) : 30;
+
+  return safePosition <= earlySkipLimit ? "early_skip" : "late_skip";
+}
+
+function getSmartShuffleWeight(track: Track, currentIndex: number, index: number) {
+  if (index === currentIndex) return 0;
+
+  const entry = smartShuffleProfile[track.contentId];
+  const baseScore = entry?.score ?? 1;
+  const lastPlayedAt = entry?.lastPlayedAt ?? 0;
+  const timeSinceLastPlay = lastPlayedAt > 0 ? Date.now() - lastPlayedAt : Infinity;
+  const recencyFactor =
+    timeSinceLastPlay < SMART_SHUFFLE_RECENT_WINDOW_MS
+      ? Math.max(0.12, timeSinceLastPlay / SMART_SHUFFLE_RECENT_WINDOW_MS)
+      : 1;
+
+  return clamp(baseScore * recencyFactor, 0, SMART_SHUFFLE_MAX_WEIGHT);
+}
+
+function getSmartShuffleQueueIndex(queue: Track[], currentIndex: number) {
+  if (queue.length <= 0) return -1;
+  if (queue.length === 1) return currentIndex >= 0 ? currentIndex : 0;
+
+  void loadSmartShuffleProfile();
+
+  const weightedCandidates = queue
+    .map((track, index) => ({
+      index,
+      weight: getSmartShuffleWeight(track, currentIndex, index),
+    }))
+    .filter((candidate) => candidate.weight > 0);
+
+  if (!weightedCandidates.length) {
+    return getRandomQueueIndex(queue.length, currentIndex);
+  }
+
+  const totalWeight = weightedCandidates.reduce(
+    (sum, candidate) => sum + candidate.weight,
+    0
+  );
+
+  let target = Math.random() * totalWeight;
+
+  for (const candidate of weightedCandidates) {
+    target -= candidate.weight;
+
+    if (target <= 0) {
+      return candidate.index;
+    }
+  }
+
+  return weightedCandidates[weightedCandidates.length - 1].index;
+}
+
+function getNextQueueIndex(
+  queue: Track[],
+  currentIndex: number,
+  repeatMode: "off" | "one" | "all",
+  shuffleEnabled: boolean
+) {
+  const queueLength = queue.length;
+
+  if (queueLength <= 0) return -1;
+
+  if (shuffleEnabled) {
+    if (queueLength > 1) return getSmartShuffleQueueIndex(queue, currentIndex);
+    return repeatMode === "all" ? 0 : -1;
+  }
+
+  const nextIndex = currentIndex + 1;
+
+  if (nextIndex < queueLength) return nextIndex;
+
+  return repeatMode === "all" ? 0 : -1;
+}
+
+function handleExternalPause(
+  token: number,
+  currentTime: number,
+  totalDuration: number
+) {
+  const latestState = usePlayerStore.getState();
+
+  if (latestState.playbackToken !== token) return;
+  if (!desiredPlaying) return;
+
+  desiredPlaying = false;
+  clearTransitionTimeout();
+  clearResumeRetryTimeout();
+  stopMonitor();
+  isRecoveringFromStall = false;
+  stallRecoveryAttempts = 0;
+
+  if (latestState.currentTrack) {
+    trackMusicEnd(
+      "music_pause",
+      latestState.currentTrack,
+      currentTime,
+      totalDuration,
+      {
+        action: "external_pause",
+      }
+    );
+  }
+
+  usePlayerStore.setState({
+    position: currentTime,
+    duration: totalDuration,
+    isPlaying: false,
+    isLoading: false,
+    isBuffering: false,
+  });
 }
 
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
@@ -278,6 +542,7 @@ function trackMusicStart(
 
   analyticsStartedForTrack = true;
   lastAnalyticsProgressPosition = Math.max(0, position);
+  learnSmartShuffle(track, "play");
 
   void trackAnalyticsEvent({
     eventType: "music_start",
@@ -351,6 +616,18 @@ function trackMusicEnd(
     0,
     safePosition - lastAnalyticsProgressPosition
   );
+  const direction =
+    typeof metadata?.direction === "string" ? metadata.direction : null;
+
+  if (eventType === "music_complete") {
+    learnSmartShuffle(track, "complete");
+  } else if (eventType === "music_skip") {
+    if (direction === "restart") {
+      learnSmartShuffle(track, "restart");
+    } else if (direction === "next" || direction === "previous") {
+      learnSmartShuffle(track, getSkipSignal(safePosition, duration));
+    }
+  }
 
   lastAnalyticsProgressPosition = safePosition;
 
@@ -394,8 +671,14 @@ function startMonitor(token: number) {
     const playerAny = state.player as any;
     const currentTime = safeNumber(playerAny.currentTime ?? state.position, 0);
     const isLoaded = Boolean(playerAny.isLoaded ?? !state.isLoading);
+    const playing = Boolean(playerAny.playing ?? state.isPlaying);
     const buffering = Boolean(playerAny.isBuffering ?? state.isBuffering);
     const duration = safeNumber(playerAny.duration ?? state.duration, 0);
+
+    if (isLoaded && !playing && !buffering && !isInStartupResumeWindow()) {
+      handleExternalPause(token, currentTime, duration);
+      return;
+    }
 
     if (currentTime > lastObservedPosition + 0.15) {
       lastObservedPosition = currentTime;
@@ -510,7 +793,8 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
       !playing &&
       !buffering &&
       !didJustFinish &&
-      currentTime <= 0.25
+      currentTime <= 0.25 &&
+      isInStartupResumeWindow()
     ) {
       clearResumeRetryTimeout();
 
@@ -530,6 +814,11 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
     clearResumeRetryTimeout();
 
+    if (desiredPlaying && isLoaded && !playing && !buffering && !didJustFinish) {
+      handleExternalPause(token, currentTime, totalDuration);
+      return;
+    }
+
     if (didJustFinish) {
       clearResumeRetryTimeout();
       clearTransitionTimeout();
@@ -547,6 +836,7 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
           {
             completed_naturally: true,
             repeat_mode: latestState.repeatMode,
+            shuffle_enabled: latestState.shuffleEnabled,
           }
         );
       }
@@ -572,12 +862,12 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
         return;
       }
 
-      const queuedNextIndex =
-        latestState.currentIndex + 1 >= latestState.queue.length
-          ? latestState.repeatMode === "all"
-            ? 0
-            : -1
-          : latestState.currentIndex + 1;
+      const queuedNextIndex = getNextQueueIndex(
+        latestState.queue,
+        latestState.currentIndex,
+        latestState.repeatMode,
+        latestState.shuffleEnabled
+      );
 
       const queuedNextTrack =
         queuedNextIndex >= 0 ? latestState.queue[queuedNextIndex] : null;
@@ -589,12 +879,12 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
             if (!desiredPlaying) return;
 
-            const nextIndex =
-              newestState.currentIndex + 1 >= newestState.queue.length
-                ? newestState.repeatMode === "all"
-                  ? 0
-                  : -1
-                : newestState.currentIndex + 1;
+            const nextIndex = getNextQueueIndex(
+              newestState.queue,
+              newestState.currentIndex,
+              newestState.repeatMode,
+              newestState.shuffleEnabled
+            );
 
             if (nextIndex < 0) return;
 
@@ -724,11 +1014,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   offlineMap: {},
   transitionLock: false,
   repeatMode: "off",
+  shuffleEnabled: false,
 
   toggleRepeatMode: () => {
     const current = get().repeatMode;
     const next = current === "off" ? "one" : current === "one" ? "all" : "off";
     set({ repeatMode: next });
+  },
+
+  toggleShuffle: () => {
+    void loadSmartShuffleProfile();
+    set((state) => ({ shuffleEnabled: !state.shuffleEnabled }));
   },
 
   rememberUrl: (contentId, url) => {
@@ -793,6 +1089,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setQueue: (tracks, startIndex = 0) => {
+    void loadSmartShuffleProfile();
+
     const safeTracks = normalizeQueue(tracks);
     const safeIndex =
       safeTracks.length === 0
@@ -1160,6 +1458,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   setQueueAndPlay: async (tracks, trackToPlay) => {
+    void loadSmartShuffleProfile();
+
     const safeTracks = normalizeQueue(tracks);
     if (!safeTracks.length) return;
 
@@ -1184,6 +1484,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track, queueOverride, indexOverride, options) => {
+    void loadSmartShuffleProfile();
+
     const token = nextToken();
     const state = get();
     const queue = normalizeQueue(queueOverride ?? state.queue);
@@ -1201,6 +1503,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     desiredPlaying = true;
+    markPlaybackCommandStarted();
     clearTransitionTimeout();
     clearResumeRetryTimeout();
     stopMonitor();
@@ -1293,6 +1596,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           throw new Error("BLOQUEADO ONLINE SAME TRACK: " + playbackUrl);
         }
 
+        markPlaybackCommandStarted();
         currentPlayer.play();
 
         trackMusicStart(
@@ -1361,6 +1665,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         } catch {}
       }
 
+      markPlaybackCommandStarted();
       player.play();
 
       const ready = await waitForPlayerReady(token, 8000);
@@ -1502,7 +1807,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   playNext: async () => {
-    const { queue, currentIndex, transitionLock, repeatMode } = get();
+    const { queue, currentIndex, transitionLock, repeatMode, shuffleEnabled } = get();
     if (transitionLock) return;
 
     const skippedTrack = get().currentTrack;
@@ -1516,32 +1821,34 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         {
           direction: "next",
           initiated_by: "user",
+          shuffle_enabled: shuffleEnabled,
         }
       );
     }
 
-    let nextIndex = currentIndex + 1;
+    const nextIndex = getNextQueueIndex(
+      queue,
+      currentIndex,
+      repeatMode,
+      shuffleEnabled
+    );
 
-    if (nextIndex >= queue.length) {
-      if (repeatMode === "all" && queue.length > 0) {
-        nextIndex = 0;
-      } else {
-        desiredPlaying = false;
-        clearTransitionTimeout();
-        clearResumeRetryTimeout();
-        isRecoveringFromStall = false;
-        stallRecoveryAttempts = 0;
+    if (nextIndex < 0 || nextIndex >= queue.length) {
+      desiredPlaying = false;
+      clearTransitionTimeout();
+      clearResumeRetryTimeout();
+      isRecoveringFromStall = false;
+      stallRecoveryAttempts = 0;
 
-        deactivateLockScreen(get().player);
+      deactivateLockScreen(get().player);
 
-        set({
-          isPlaying: false,
-          isLoading: false,
-          isBuffering: false,
-        });
+      set({
+        isPlaying: false,
+        isLoading: false,
+        isBuffering: false,
+      });
 
-        return;
-      }
+      return;
     }
 
     const isOffline = await isOfflineAvailable(queue[nextIndex].contentId);
@@ -1567,7 +1874,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       currentIndex,
       position,
       transitionLock,
-      player,
       currentTrack,
       repeatMode,
       queue,
@@ -1575,54 +1881,40 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     if (transitionLock) return;
 
-    if (position > 3 && currentIndex >= 0 && player) {
+    if (position > 3 && currentIndex >= 0 && currentTrack) {
       desiredPlaying = true;
       isRecoveringFromStall = false;
       clearResumeRetryTimeout();
 
-      try {
-        if (currentTrack) {
-          void trackAnalyticsEvent({
-            eventType: "music_skip",
-            playbackUuid: getPlaybackAnalyticsUuid(),
-            entityType: "content",
-            entityId: currentTrack.contentId,
-            positionSeconds: position,
-            durationSeconds: get().duration,
-            metadata: {
-              track_id: currentTrack.id,
-              title: currentTrack.title,
-              direction: "restart",
-              initiated_by: "user",
-            },
-          });
-        
-          lastAnalyticsProgressPosition = 0;
-        }
-        player.seekTo(0);
-        activateLockScreen(
-          player,
-          currentTrack ?? {
-            id: 0,
-            contentId: 0,
-            title: "Clube CSV",
-          }
+      void trackAnalyticsEvent({
+        eventType: "music_skip",
+        playbackUuid: getPlaybackAnalyticsUuid(),
+        entityType: "content",
+        entityId: currentTrack.contentId,
+        positionSeconds: position,
+        durationSeconds: get().duration,
+        metadata: {
+          track_id: currentTrack.id,
+          title: currentTrack.title,
+          direction: "restart",
+          initiated_by: "user",
+        },
+      });
+
+      learnSmartShuffle(currentTrack, "restart");
+      lastAnalyticsProgressPosition = 0;
+
+      await enqueueSwitch(async () => {
+        const fresh = get();
+        if (fresh.transitionLock || !fresh.currentTrack) return;
+
+        await fresh.playTrack(
+          fresh.currentTrack,
+          fresh.queue,
+          fresh.currentIndex,
+          { forceReload: true }
         );
-        player.play();
-
-        lastObservedPosition = 0;
-        lastProgressAt = Date.now();
-        stallRecoveryAttempts = 0;
-
-        set({
-          isPlaying: true,
-          isLoading: false,
-          isBuffering: false,
-          position: 0,
-        });
-      } catch (error) {
-        console.log("Erro ao reiniciar faixa:", error);
-      }
+      });
 
       return;
     }
@@ -1648,6 +1940,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         {
           direction: "previous",
           initiated_by: "user",
+          shuffle_enabled: get().shuffleEnabled,
         }
       );
     }
@@ -1738,6 +2031,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       desiredPlaying = true;
       clearResumeRetryTimeout();
 
+      markPlaybackCommandStarted();
       player.play();
 
       if (currentTrack) {

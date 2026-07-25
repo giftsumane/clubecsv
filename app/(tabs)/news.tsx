@@ -1,3 +1,4 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
@@ -81,11 +82,40 @@ export default function NewsScreen() {
   };
 
   const handleNewsPress = (item: NewsItem) => {
+    void trackAnalyticsEvent({
+      eventType: "news_view",
+      entityType: "news",
+      entityId: item.id,
+      metadata: {
+        title: item.title,
+        artist_name: item.artist_name ?? null,
+        source: "news_tab",
+        has_external_link: Boolean(item.link),
+      },
+    });
+
     router.push(`/news/${item.id}`);
   };
   
-  const handleOpenLink = async (link?: string | null) => {
+  const handleOpenLink = async (
+    link?: string | null,
+    item?: NewsItem
+  ) => {
     if (!link) return;
+
+    if (item) {
+      void trackAnalyticsEvent({
+        eventType: "news_view",
+        entityType: "news",
+        entityId: item.id,
+        metadata: {
+          title: item.title,
+          action: "external_link",
+          external_url: link,
+          source: "news_tab",
+        },
+      });
+    }
   
     try {
       await WebBrowser.openBrowserAsync(link);
@@ -160,7 +190,7 @@ export default function NewsScreen() {
                     <Pressable
                       onPress={(event) => {
                         event.stopPropagation();
-                        handleOpenLink(item.link);
+                        handleOpenLink(item.link, item);
                       }}
                     >
                       <Text style={styles.externalActionText}>Abrir link externo</Text>

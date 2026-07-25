@@ -1,10 +1,11 @@
+import { trackAnalyticsEvent } from "@/services/analytics";
 import { api } from "@/src/api/client";
 import AppGradient from "@/src/components/AppGradient";
 import { usePlayerStore, type Track } from "@/src/store/playerStore";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -33,6 +34,7 @@ export default function LibraryContentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [content, setContent] = useState<Content | null>(null);
   const [loading, setLoading] = useState(true);
+  const trackedContentViewRef = useRef<number | null>(null);
 
   const setQueueAndPlay = usePlayerStore((state) => state.setQueueAndPlay);
   const currentTrack = usePlayerStore((state) => state.currentTrack);
@@ -93,6 +95,27 @@ export default function LibraryContentDetailScreen() {
 
     hydrateOfflineState([content.id]).catch(() => {});
   }, [content, preloadQueue, hydrateOfflineState]);
+
+  useEffect(() => {
+    if (!content?.id) return;
+
+    if (trackedContentViewRef.current === content.id) {
+      return;
+    }
+
+    trackedContentViewRef.current = content.id;
+
+    void trackAnalyticsEvent({
+      eventType: "content_view",
+      entityType: "content",
+      entityId: content.id,
+      metadata: {
+        title: content.title,
+        artist_name: content.artist?.name ?? null,
+        source: "library_detail",
+      },
+    });
+  }, [content]);
 
   const handlePlay = async () => {
     if (!content) return;

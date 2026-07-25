@@ -24,7 +24,9 @@ export default function PlayerBar() {
   const queue = usePlayerStore((state) => state.queue);
 
   const repeatMode = usePlayerStore((state) => state.repeatMode);
+  const shuffleEnabled = usePlayerStore((state) => state.shuffleEnabled);
   const toggleRepeatMode = usePlayerStore((state) => state.toggleRepeatMode);
+  const toggleShuffle = usePlayerStore((state) => state.toggleShuffle);
 
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const playNext = usePlayerStore((state) => state.playNext);
@@ -42,7 +44,7 @@ export default function PlayerBar() {
   const hasPrev = repeatMode === "all" ? queue.length > 1 : currentIndex > 0;
 
   const hasNext =
-    repeatMode === "all"
+    shuffleEnabled || repeatMode === "all"
       ? queue.length > 1
       : currentIndex >= 0 && currentIndex < queue.length - 1;
 
@@ -63,6 +65,10 @@ export default function PlayerBar() {
 
   const repeatLabel =
     repeatMode === "one" ? "1" : repeatMode === "all" ? "∞" : "";
+
+  const shuffleIconColor = shuffleEnabled
+    ? colors.yellow
+    : "rgba(255,255,255,0.48)";
 
   const openPlayerDetail = () => {
     if (pathname !== "/player") {
@@ -127,6 +133,19 @@ export default function PlayerBar() {
           <Pressable
             style={({ pressed }) => [
               styles.repeatButton,
+              shuffleEnabled && styles.modeButtonActive,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={toggleShuffle}
+            hitSlop={8}
+          >
+            <Ionicons name="shuffle" size={17} color={shuffleIconColor} />
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.repeatButton,
+              repeatMode !== "off" && styles.modeButtonActive,
               pressed && styles.buttonPressed,
             ]}
             onPress={toggleRepeatMode}
@@ -211,7 +230,9 @@ export default function PlayerBar() {
           <Text style={styles.timeText}>{formatTime(safePosition)}</Text>
 
           <Text style={styles.repeatModeText}>
-            {repeatMode === "off"
+            {shuffleEnabled
+              ? "Aleatório ligado"
+              : repeatMode === "off"
               ? "Repetição desligada"
               : repeatMode === "one"
               ? "Repetir música"
@@ -333,6 +354,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
+  },
+
+  modeButtonActive: {
+    backgroundColor: "rgba(255,214,10,0.14)",
+    borderColor: "rgba(255,214,10,0.36)",
   },
 
   repeatLabel: {
