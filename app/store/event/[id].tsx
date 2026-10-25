@@ -3,6 +3,7 @@ import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -30,6 +31,19 @@ type StoreEventDetail = {
   };
 };
 
+type EventPromotion = {
+  id: number;
+  album_title?: string | null;
+  ticket_name?: string | null;
+  normal_price: number;
+  special_price: number;
+  starts_at: string;
+  ends_at: string;
+  owns_album: boolean;
+  used: boolean;
+  eligible: boolean;
+};
+
 function formatDate(date?: string | null) {
   if (!date) return "";
   try {
@@ -47,6 +61,8 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [event, setEvent] = useState<StoreEventDetail["event"] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [promotion, setPromotion] = useState<EventPromotion | null>(null);
+  const [openingPromotion, setOpeningPromotion] = useState(false);
 
   useEffect(() => {
     const fetchEventDetail = async () => {
@@ -54,6 +70,13 @@ export default function EventDetailScreen() {
         setLoading(true);
         const { data } = await api.get<StoreEventDetail>(`/store/events/${id}`);
         setEvent(data.event || null);
+
+        try {
+          const promotionResponse = await api.get(`/store/events/${id}/promotion`);
+          setPromotion(promotionResponse.data?.promotion || null);
+        } catch {
+          setPromotion(null);
+        }
       } catch (error) {
         console.log("Erro ao carregar detalhe do evento:", error);
         setEvent(null);
@@ -74,6 +97,21 @@ export default function EventDetailScreen() {
       await Linking.openURL(event.external_url);
     } catch (error) {
       console.log("Erro ao abrir link do evento:", error);
+    }
+  };
+
+  const handlePromotionCheckout = async () => {
+    if (!event || openingPromotion) return;
+
+    try {
+      setOpeningPromotion(true);
+      const { data } = await api.post(`/store/events/${event.id}/promotion-checkout`);
+      if (!data?.url) throw new Error("Link de promoção indisponível.");
+      await WebBrowser.openBrowserAsync(data.url);
+    } catch (error: any) {
+      console.log("Erro ao abrir promoção:", error?.response?.data || error);
+    } finally {
+      setOpeningPromotion(false);
     }
   };
 
@@ -144,6 +182,39 @@ export default function EventDetailScreen() {
             <Text style={styles.body}>Preço VIP: {event.price_vip} MZN</Text>
           )}
         </View>
+
+        {promotion ? (
+          <View style={styles.promotionCard}>
+            <Text style={styles.promotionKicker}>BENEFÍCIO CLUBE CSV</Text>
+            <Text style={styles.promotionTitle}>
+              Preço especial para clientes do álbum {promotion.album_title || "associado"}
+            </Text>
+            <Text style={styles.promotionDates}>
+              Válido até {formatDate(promotion.ends_at)}
+            </Text>
+            <View style={styles.promotionPriceRow}>
+              <Text style={styles.oldPrice}>{promotion.normal_price} MZN</Text>
+              <Text style={styles.specialPrice}>{promotion.special_price} MZN</Text>
+            </View>
+            {!promotion.owns_album ? (
+              <Text style={styles.promotionHint}>Compra o álbum associado para desbloquear este benefício.</Text>
+            ) : promotion.used ? (
+              <Text style={styles.promotionHint}>Este benefício já foi utilizado.</Text>
+            ) : (
+              <Pressable
+                style={[styles.promotionButton, openingPromotion && styles.buttonDisabled]}
+                onPress={handlePromotionCheckout}
+                disabled={openingPromotion}
+              >
+                {openingPromotion ? (
+                  <ActivityIndicator color="#111" />
+                ) : (
+                  <Text style={styles.buttonText}>Comprar com preço especial</Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+        ) : null}
 
         {event.external_url && (
           <Pressable style={styles.button} onPress={handleOpenTickets}>
@@ -251,4 +322,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
   },
+  buttonDisabled: { opacity: 0.7 },
+  promotionCard: {
+    marginTop: 22,
+    padding: 18,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,214,0,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,214,0,0.45)",
+  },
+  promotionKicker: { color: colors.yellow, fontSize: 12, fontWeight: "900", letterSpacing: 1 },
+  promotionTitle: { color: colors.white, fontSize: 18, lineHeight: 24, fontWeight: "800", marginTop: 8 },
+  promotionDates: { color: colors.textMuted, fontSize: 13, marginTop: 8 },
+  promotionPriceRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14 },
+  oldPrice: { color: colors.textMuted, fontSize: 16, textDecorationLine: "line-through" },
+  specialPrice: { color: colors.yellow, fontSize: 24, fontWeight: "900" },
+  promotionHint: { color: colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: 14 },
+  promotionButton: { marginTop: 16, backgroundColor: colors.yellow, borderRadius: 14, paddingVertical: 14, alignItems: "center" },
 });

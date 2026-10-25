@@ -1,4 +1,5 @@
 import { api } from "@/src/api/client";
+import { getMyOrders } from "@/services/orders";
 import AppGradient from "@/src/components/AppGradient";
 import { colors } from "@/src/theme/colors";
 import type { Purchase } from "@/src/types";
@@ -17,6 +18,7 @@ import {
 
 export default function PurchasesScreen() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,8 +27,12 @@ export default function PurchasesScreen() {
 
   const fetchPurchases = async () => {
     try {
-      const { data } = await api.get("/purchases/my");
+      const [{ data }, merchOrders] = await Promise.all([
+        api.get("/purchases/my"),
+        getMyOrders(),
+      ]);
       setPurchases(data.purchases || []);
+      setOrders(merchOrders);
     } catch (error) {
       console.log(error);
     } finally {
@@ -48,7 +54,7 @@ export default function PurchasesScreen() {
     );
   }
 
-  if (!purchases.length) {
+  if (!purchases.length && !orders.length) {
     return (
       <AppGradient>
         <View style={styles.center}>
@@ -64,14 +70,21 @@ export default function PurchasesScreen() {
   return (
     <AppGradient>
       <FlatList
-        data={purchases}
-        keyExtractor={(item) => item.id.toString()}
+        data={[
+          ...orders.map((order) => ({ ...order, historyType: "order" as const })),
+          ...purchases.map((purchase) => ({ ...purchase, historyType: "purchase" as const })),
+        ]}
+        keyExtractor={(item) => `${item.historyType}-${item.id}`}
         contentContainerStyle={styles.container}
         renderItem={({ item }) => (
           <View style={styles.card}>
+            <Text style={styles.typeLabel}>{item.historyType === "order" ? "ENCOMENDA MERCH" : "COMPRA DIGITAL"}</Text>
             <Text style={styles.ref}>{item.reference}</Text>
-            <Text style={styles.amount}>{formatPrice(item.amount)}</Text>
-            <Text style={styles.status}>Estado: {item.status}</Text>
+            <Text style={styles.amount}>{formatPrice(Number(item.historyType === "order" ? item.total || item.subtotal : item.amount))}</Text>
+            <Text style={styles.status}>Estado: {formatStatus(item.status)}</Text>
+            {item.historyType === "order" && item.items?.[0] ? (
+              <Text style={styles.itemTitle}>{item.items[0].quantity} × {item.items[0].title}</Text>
+            ) : null}
           </View>
         )}
         ListHeaderComponent={
@@ -83,7 +96,7 @@ export default function PurchasesScreen() {
             <Text style={styles.kicker}>A tua conta</Text>
             <Text style={styles.title}>Histórico de compras</Text>
             <Text style={styles.subtitle}>
-              Consulta as tuas compras de músicas e álbuns.
+              Consulta compras digitais e acompanha encomendas de merch.
             </Text>
           </View>
         }
@@ -156,6 +169,8 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
   },
+  typeLabel: { color: colors.yellow, fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginBottom: 6 },
+  itemTitle: { marginTop: 8, color: colors.white, fontSize: 14 },
   amount: {
     marginTop: 8,
     fontSize: 18,
@@ -174,3 +189,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 });
+
+function formatStatus(status?: string) {
+  const labels: Record<string, string> = {
+    pending_payment: "Aguarda pagamento",
+    awaiting_delivery_quote: "Aguarda preço de delivery",
+    paid: "Paga",
+    processing: "Em preparação",
+    ready: "Pronta",
+    shipped: "Enviada",
+    delivered: "Entregue",
+    cancelled: "Cancelada",
+    pending: "Pendente",
+    failed: "Falhada",
+    canceled: "Cancelada",
+  };
+  return labels[status || ""] || status || "—";
+}
