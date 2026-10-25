@@ -1,4 +1,5 @@
 import { startPayment, waitForPayment } from '@/services/payments';
+import { useLibraryStore } from '@/src/store/libraryStore';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
@@ -11,6 +12,7 @@ type Props = {
 
 export default function PurchaseButton({ type, targetId, label }: Props) {
   const [loading, setLoading] = useState(false);
+  const fetchLibrary = useLibraryStore((state) => state.fetchLibrary);
 
   const handlePurchase = async () => {
     try {
@@ -27,6 +29,12 @@ export default function PurchaseButton({ type, targetId, label }: Props) {
 
       if (result.status === 'paid') {
        /* Alert.alert('Sucesso', 'Pagamento confirmado com sucesso.');*/
+        try {
+          await fetchLibrary();
+        } catch (error) {
+          console.log('Erro ao actualizar biblioteca após compra:', error);
+        }
+
         router.replace('/(tabs)/library');
         return;
       }

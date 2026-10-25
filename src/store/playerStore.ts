@@ -473,6 +473,48 @@ function handleExternalPause(
   });
 }
 
+function handleExternalPlay(
+  token: number,
+  currentTime: number,
+  totalDuration: number
+) {
+  const latestState = usePlayerStore.getState();
+
+  if (latestState.playbackToken !== token) return;
+  if (desiredPlaying) return;
+  if (!latestState.player || !latestState.currentTrack) return;
+
+  desiredPlaying = true;
+  clearResumeRetryTimeout();
+  isRecoveringFromStall = false;
+  stallRecoveryAttempts = 0;
+  lastObservedPosition = Math.max(0, currentTime);
+  lastProgressAt = Date.now();
+
+  activateLockScreen(latestState.player, latestState.currentTrack);
+  startMonitor(token);
+
+  void trackAnalyticsEvent({
+    eventType: "music_resume",
+    playbackUuid: getPlaybackAnalyticsUuid(),
+    entityType: "content",
+    entityId: latestState.currentTrack.contentId,
+    positionSeconds: currentTime,
+    durationSeconds: totalDuration,
+    metadata: {
+      track_id: latestState.currentTrack.id,
+      title: latestState.currentTrack.title,
+      artist_name: latestState.currentTrack.artistName ?? null,
+      source: "offline",
+      action: "external_play",
+    },
+  });
+}
+
+function isNearTrackEnd(currentTime: number, duration: number) {
+  return duration > 0 && currentTime >= duration - 1.5;
+}
+
 async function resolveTrackUrl(track: Track, cache: UrlCache): Promise<string> {
   const cached = cache[track.contentId];
 
@@ -675,7 +717,13 @@ function startMonitor(token: number) {
     const buffering = Boolean(playerAny.isBuffering ?? state.isBuffering);
     const duration = safeNumber(playerAny.duration ?? state.duration, 0);
 
-    if (isLoaded && !playing && !buffering && !isInStartupResumeWindow()) {
+    if (
+      isLoaded &&
+      !playing &&
+      !buffering &&
+      !isInStartupResumeWindow() &&
+      !isNearTrackEnd(currentTime, duration)
+    ) {
       handleExternalPause(token, currentTime, duration);
       return;
     }
@@ -754,6 +802,10 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
     const isLoaded = Boolean(status?.isLoaded ?? playerAny.isLoaded ?? false);
     const didJustFinish = Boolean(status?.didJustFinish ?? false);
 
+    if (!desiredPlaying && isLoaded && playing && !didJustFinish) {
+      handleExternalPlay(token, currentTime, totalDuration);
+    }
+
     if (currentTime > lastObservedPosition + 0.1) {
       lastObservedPosition = currentTime;
       lastProgressAt = Date.now();
@@ -814,7 +866,14 @@ function attachPlaybackListener(player: AudioPlayer, token: number) {
 
     clearResumeRetryTimeout();
 
-    if (desiredPlaying && isLoaded && !playing && !buffering && !didJustFinish) {
+    if (
+      desiredPlaying &&
+      isLoaded &&
+      !playing &&
+      !buffering &&
+      !didJustFinish &&
+      !isNearTrackEnd(currentTime, totalDuration)
+    ) {
       handleExternalPause(token, currentTime, totalDuration);
       return;
     }
@@ -1114,7 +1173,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const alreadyOffline = await isOfflineAvailable(
         track.contentId
       );
-  
+
       if (alreadyOffline) {
         get().markOfflineAvailable(track.contentId, true);
   

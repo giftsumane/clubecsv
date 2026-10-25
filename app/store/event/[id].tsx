@@ -135,9 +135,6 @@ export default function EventDetailScreen() {
         ) : null}
 
         <View style={styles.bodyWrapper}>
-          {!!event.ticket_type && (
-            <Text style={styles.body}>Tipo de bilhete: {event.ticket_type}</Text>
-          )}
 
           {event.price_normal !== null && event.price_normal !== undefined && (
             <Text style={styles.body}>Preço normal: {event.price_normal} MZN</Text>

@@ -2,10 +2,12 @@ import { trackAnalyticsEvent } from "@/services/analytics";
 import AppGradient from "@/src/components/AppGradient";
 import { useLibraryStore } from "@/src/store/libraryStore";
 import { colors } from "@/src/theme/colors";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Pressable,
@@ -37,6 +39,8 @@ export default function LibraryScreen() {
   const musics = useLibraryStore((state) => state.musics);
   const loading = useLibraryStore((state) => state.loading);
   const fetchLibrary = useLibraryStore((state) => state.fetchLibrary);
+
+  const [refreshing, setRefreshing] = useState(false);
 
   const didFetchRef = useRef(false);
 
@@ -92,6 +96,34 @@ export default function LibraryScreen() {
     }
   }
 
+  async function handleRefreshLibrary() {
+    if (refreshing || loading) return;
+
+    try {
+      setRefreshing(true);
+      await fetchLibrary();
+      const refreshedState = useLibraryStore.getState();
+
+      void trackAnalyticsEvent({
+        eventType: "content_view",
+        entityType: "page",
+        metadata: {
+          source: "library_refresh_button",
+          albums_count: refreshedState.albums.length,
+          musics_count: refreshedState.musics.length,
+        },
+      });
+    } catch (error) {
+      console.log("Erro ao actualizar biblioteca:", error);
+      Alert.alert(
+        "Sem actualização",
+        "Não foi possível actualizar a biblioteca agora. Confirma a ligação à internet."
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (showFullLoader) {
     return (
       <AppGradient>
@@ -110,7 +142,25 @@ export default function LibraryScreen() {
 
           {loading && data.length > 0 ? (
             <ActivityIndicator color={colors.white} size="small" />
-          ) : null}
+          ) : (
+            <Pressable
+              style={[
+                styles.refreshButton,
+                refreshing && styles.refreshButtonDisabled,
+              ]}
+              onPress={handleRefreshLibrary}
+              disabled={refreshing}
+            >
+              {refreshing ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <Ionicons name="refresh" size={18} color={colors.white} />
+              )}
+              <Text style={styles.refreshButtonText}>
+                {refreshing ? "A actualizar..." : "Actualizar"}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         <FlatList
@@ -180,6 +230,26 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: "800",
     color: colors.white,
+  },
+  refreshButton: {
+    minHeight: 36,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  refreshButtonDisabled: {
+    opacity: 0.75,
+  },
+  refreshButtonText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: "800",
   },
   emptyContainer: {
     justifyContent: "center",

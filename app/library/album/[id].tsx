@@ -75,6 +75,21 @@ export default function LibraryAlbumDetailScreen() {
   const contents = album?.contents || album?.tracks || [];
   const coverHeight = Math.max(140, Math.min(190, height * 0.23));
 
+  const buildQueueFromAlbum = (sourceAlbum: Album | null): Track[] => {
+    const sourceContents = sourceAlbum?.contents || sourceAlbum?.tracks || [];
+
+    return sourceContents.map((item) => ({
+      id: item.id,
+      contentId: item.id,
+      albumId: sourceAlbum?.id ?? null,
+      albumTitle: sourceAlbum?.title ?? null,
+      title: item.title,
+      url: null,
+      cover_url: item.cover_url ?? sourceAlbum?.cover_url ?? null,
+      artistName: item.artist?.name ?? sourceAlbum?.artist?.name ?? null,
+    }));
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -99,7 +114,7 @@ export default function LibraryAlbumDetailScreen() {
         const payload = res.data?.album || res.data;
 
         if (payload?.id) {
-          saveAlbumDetail(payload);
+          await saveAlbumDetail(payload);
 
           if (mounted) {
             setAlbum(payload);
@@ -158,17 +173,8 @@ export default function LibraryAlbumDetailScreen() {
   }, [album]);
 
   const queue = useMemo<Track[]>(() => {
-    return contents.map((item) => ({
-      id: item.id,
-      contentId: item.id,
-      albumId: album?.id ?? null,
-      albumTitle: album?.title ?? null,
-      title: item.title,
-      url: null,
-      cover_url: item.cover_url ?? album?.cover_url ?? null,
-      artistName: item.artist?.name ?? album?.artist?.name ?? null,
-    }));
-  }, [contents, album]);
+    return buildQueueFromAlbum(album);
+  }, [album]);
 
   useEffect(() => {
     if (!queue.length) return;

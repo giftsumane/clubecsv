@@ -46,6 +46,21 @@ export default function AlbumDetailScreen() {
   );
   const isTrackOffline = usePlayerStore((state) => state.isTrackOffline);
 
+  const buildQueueFromAlbum = (sourceAlbum: Album | null): Track[] => {
+    const sourceTracks = sourceAlbum?.tracks || sourceAlbum?.contents || [];
+
+    return sourceTracks.map((track: any) => ({
+      id: track.id,
+      contentId: track.id,
+      albumId: sourceAlbum?.id ?? null,
+      albumTitle: sourceAlbum?.title ?? null,
+      title: track.title,
+      url: null,
+      cover_url: track.cover_url ?? sourceAlbum?.cover_url ?? null,
+      artistName: track.artist?.name ?? sourceAlbum?.artist?.name ?? null,
+    }));
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -133,17 +148,8 @@ export default function AlbumDetailScreen() {
   const tracks = album?.tracks || album?.contents || [];
 
   const queue = useMemo<Track[]>(() => {
-    return tracks.map((track: any) => ({
-      id: track.id,
-      contentId: track.id,
-      albumId: album?.id ?? null,
-      albumTitle: album?.title ?? null,
-      title: track.title,
-      url: null,
-      cover_url: track.cover_url ?? album?.cover_url ?? null,
-      artistName: track.artist?.name ?? album?.artist?.name ?? null,
-    }));
-  }, [tracks, album]);
+    return buildQueueFromAlbum(album);
+  }, [album]);
 
   useEffect(() => {
     if (!queue.length) return;
@@ -161,7 +167,14 @@ export default function AlbumDetailScreen() {
 
   const handleDownloadAlbum = async () => {
     try {
+      if (!queue.length) {
+        Alert.alert("Álbum vazio", "Este álbum ainda não tem faixas.");
+        return;
+      }
+
       await downloadAlbumOffline(queue);
+      await hydrateOfflineState(queue.map((item) => item.contentId));
+
       Alert.alert("Offline", "Álbum descarregado com sucesso.");
     } catch (error) {
       console.log("Erro ao descarregar álbum:", error);
