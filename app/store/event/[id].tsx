@@ -61,8 +61,8 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [event, setEvent] = useState<StoreEventDetail["event"] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [promotion, setPromotion] = useState<EventPromotion | null>(null);
-  const [openingPromotion, setOpeningPromotion] = useState(false);
+  const [promotions, setPromotions] = useState<EventPromotion[]>([]);
+  const [openingPromotionId, setOpeningPromotionId] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchEventDetail = async () => {
@@ -73,9 +73,16 @@ export default function EventDetailScreen() {
 
         try {
           const promotionResponse = await api.get(`/store/events/${id}/promotion`);
-          setPromotion(promotionResponse.data?.promotion || null);
+          const availablePromotions = promotionResponse.data?.promotions;
+          setPromotions(
+            Array.isArray(availablePromotions)
+              ? availablePromotions
+              : promotionResponse.data?.promotion
+                ? [promotionResponse.data.promotion]
+                : []
+          );
         } catch {
-          setPromotion(null);
+          setPromotions([]);
         }
       } catch (error) {
         console.log("Erro ao carregar detalhe do evento:", error);
@@ -100,18 +107,20 @@ export default function EventDetailScreen() {
     }
   };
 
-  const handlePromotionCheckout = async () => {
-    if (!event || openingPromotion) return;
+  const handlePromotionCheckout = async (promotion: EventPromotion) => {
+    if (!event || openingPromotionId !== null) return;
 
     try {
-      setOpeningPromotion(true);
-      const { data } = await api.post(`/store/events/${event.id}/promotion-checkout`);
+      setOpeningPromotionId(promotion.id);
+      const { data } = await api.post(`/store/events/${event.id}/promotion-checkout`, {
+        promotion_id: promotion.id,
+      });
       if (!data?.url) throw new Error("Link de promoção indisponível.");
       await WebBrowser.openBrowserAsync(data.url);
     } catch (error: any) {
       console.log("Erro ao abrir promoção:", error?.response?.data || error);
     } finally {
-      setOpeningPromotion(false);
+      setOpeningPromotionId(null);
     }
   };
 
@@ -183,38 +192,43 @@ export default function EventDetailScreen() {
           )}
         </View>
 
-        {promotion ? (
-          <View style={styles.promotionCard}>
-            <Text style={styles.promotionKicker}>BENEFÍCIO CLUBE CSV</Text>
-            <Text style={styles.promotionTitle}>
-              Preço especial para clientes do álbum {promotion.album_title || "associado"}
-            </Text>
-            <Text style={styles.promotionDates}>
-              Válido até {formatDate(promotion.ends_at)}
-            </Text>
-            <View style={styles.promotionPriceRow}>
-              <Text style={styles.oldPrice}>{promotion.normal_price} MZN</Text>
-              <Text style={styles.specialPrice}>{promotion.special_price} MZN</Text>
+        {promotions.map((promotion) => {
+          const isOpening = openingPromotionId === promotion.id;
+
+          return (
+            <View key={promotion.id} style={styles.promotionCard}>
+              <Text style={styles.promotionKicker}>BENEFÍCIO CLUBE CSV</Text>
+              <Text style={styles.promotionTicket}>{promotion.ticket_name || "Bilhete"}</Text>
+              <Text style={styles.promotionTitle}>
+                Preço especial para clientes do álbum {promotion.album_title || "associado"}
+              </Text>
+              <Text style={styles.promotionDates}>
+                Válido até {formatDate(promotion.ends_at)}
+              </Text>
+              <View style={styles.promotionPriceRow}>
+                <Text style={styles.oldPrice}>{promotion.normal_price} MZN</Text>
+                <Text style={styles.specialPrice}>{promotion.special_price} MZN</Text>
+              </View>
+              {!promotion.owns_album ? (
+                <Text style={styles.promotionHint}>Compra o álbum associado para desbloquear este benefício.</Text>
+              ) : promotion.used ? (
+                <Text style={styles.promotionHint}>Este benefício já foi utilizado.</Text>
+              ) : (
+                <Pressable
+                  style={[styles.promotionButton, openingPromotionId !== null && styles.buttonDisabled]}
+                  onPress={() => handlePromotionCheckout(promotion)}
+                  disabled={openingPromotionId !== null}
+                >
+                  {isOpening ? (
+                    <ActivityIndicator color="#111" />
+                  ) : (
+                    <Text style={styles.buttonText}>Comprar {promotion.ticket_name || "bilhete"} com preço especial</Text>
+                  )}
+                </Pressable>
+              )}
             </View>
-            {!promotion.owns_album ? (
-              <Text style={styles.promotionHint}>Compra o álbum associado para desbloquear este benefício.</Text>
-            ) : promotion.used ? (
-              <Text style={styles.promotionHint}>Este benefício já foi utilizado.</Text>
-            ) : (
-              <Pressable
-                style={[styles.promotionButton, openingPromotion && styles.buttonDisabled]}
-                onPress={handlePromotionCheckout}
-                disabled={openingPromotion}
-              >
-                {openingPromotion ? (
-                  <ActivityIndicator color="#111" />
-                ) : (
-                  <Text style={styles.buttonText}>Comprar com preço especial</Text>
-                )}
-              </Pressable>
-            )}
-          </View>
-        ) : null}
+          );
+        })}
 
         {event.external_url && (
           <Pressable style={styles.button} onPress={handleOpenTickets}>
@@ -332,6 +346,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,214,0,0.45)",
   },
   promotionKicker: { color: colors.yellow, fontSize: 12, fontWeight: "900", letterSpacing: 1 },
+  promotionTicket: { color: colors.yellow, fontSize: 22, fontWeight: "900", marginTop: 8 },
   promotionTitle: { color: colors.white, fontSize: 18, lineHeight: 24, fontWeight: "800", marginTop: 8 },
   promotionDates: { color: colors.textMuted, fontSize: 13, marginTop: 8 },
   promotionPriceRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14 },
