@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +20,22 @@ import {
   TextInput,
   View,
 } from "react-native";
+
+const DELIVERY_DESTINATIONS = [
+  { province: "Cabo Delgado", city: "Pemba" },
+  { province: "Gaza", city: "Xai-Xai" },
+  { province: "Inhambane", city: "Inhambane" },
+  { province: "Manica", city: "Chimoio" },
+  { province: "Província de Maputo", city: "Matola" },
+  { province: "Cidade de Maputo", city: "Maputo" },
+  { province: "Nampula", city: "Nampula" },
+  { province: "Niassa", city: "Lichinga" },
+  { province: "Sofala", city: "Beira" },
+  { province: "Tete", city: "Tete" },
+  { province: "Zambézia", city: "Quelimane" },
+] as const;
+
+type PickerField = "province" | "city";
 
 export default function MerchDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -31,9 +48,32 @@ export default function MerchDetailScreen() {
   const [address, setAddress] = useState("");
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("Maputo");
-  const [province, setProvince] = useState("Maputo Cidade");
+  const [province, setProvince] = useState("Cidade de Maputo");
   const [deliveryZone, setDeliveryZone] = useState<"pickup" | "maputo_center" | "outside_maputo_center">("pickup");
   const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [pickerField, setPickerField] = useState<PickerField | null>(null);
+
+  const availableDestinations = deliveryZone === "maputo_center"
+    ? DELIVERY_DESTINATIONS.filter((destination) => destination.province === "Cidade de Maputo")
+    : DELIVERY_DESTINATIONS.filter((destination) => destination.province !== "Cidade de Maputo");
+
+  const chooseDeliveryZone = (zone: "pickup" | "maputo_center" | "outside_maputo_center") => {
+    setDeliveryZone(zone);
+
+    if (zone === "maputo_center") {
+      setProvince("Cidade de Maputo");
+      setCity("Maputo");
+    } else if (zone === "outside_maputo_center" && province === "Cidade de Maputo") {
+      setProvince("Província de Maputo");
+      setCity("Matola");
+    }
+  };
+
+  const selectDestination = (destination: (typeof DELIVERY_DESTINATIONS)[number]) => {
+    setProvince(destination.province);
+    setCity(destination.city);
+    setPickerField(null);
+  };
 
   useEffect(() => {
     const fetchMerch = async () => {
@@ -151,13 +191,13 @@ export default function MerchDetailScreen() {
           <Text style={styles.orderTitle}>Dados da encomenda</Text>
           <Text style={styles.deliveryInfo}>Podes levantar gratuitamente na CSV. No centro da Cidade de Maputo, o delivery custa 100 MZN. Fora do centro, o preço é confirmado por WhatsApp.</Text>
           <View style={styles.zoneRow}>
-            <Pressable style={[styles.zoneOption, deliveryZone === "pickup" && styles.zoneOptionActive]} onPress={() => setDeliveryZone("pickup")}>
+            <Pressable style={[styles.zoneOption, deliveryZone === "pickup" && styles.zoneOptionActive]} onPress={() => chooseDeliveryZone("pickup")}>
               <Text style={[styles.zoneText, deliveryZone === "pickup" && styles.zoneTextActive]}>Levantar na CSV · Grátis</Text>
             </Pressable>
-            <Pressable style={[styles.zoneOption, deliveryZone === "maputo_center" && styles.zoneOptionActive]} onPress={() => setDeliveryZone("maputo_center")}>
+            <Pressable style={[styles.zoneOption, deliveryZone === "maputo_center" && styles.zoneOptionActive]} onPress={() => chooseDeliveryZone("maputo_center")}>
               <Text style={[styles.zoneText, deliveryZone === "maputo_center" && styles.zoneTextActive]}>Centro de Maputo · 100 MZN</Text>
             </Pressable>
-            <Pressable style={[styles.zoneOption, deliveryZone === "outside_maputo_center" && styles.zoneOptionActive]} onPress={() => setDeliveryZone("outside_maputo_center")}>
+            <Pressable style={[styles.zoneOption, deliveryZone === "outside_maputo_center" && styles.zoneOptionActive]} onPress={() => chooseDeliveryZone("outside_maputo_center")}>
               <Text style={[styles.zoneText, deliveryZone === "outside_maputo_center" && styles.zoneTextActive]}>Fora do centro · Consultar</Text>
             </Pressable>
           </View>
@@ -168,8 +208,20 @@ export default function MerchDetailScreen() {
             <>
               <TextInput style={styles.input} placeholder="Endereço" placeholderTextColor={colors.textMuted} value={address} onChangeText={setAddress} />
               <TextInput style={styles.input} placeholder="Bairro" placeholderTextColor={colors.textMuted} value={neighborhood} onChangeText={setNeighborhood} />
-              <TextInput style={styles.input} placeholder="Cidade" placeholderTextColor={colors.textMuted} value={city} onChangeText={setCity} />
-              <TextInput style={styles.input} placeholder="Província" placeholderTextColor={colors.textMuted} value={province} onChangeText={setProvince} />
+              <Pressable style={styles.selectInput} onPress={() => setPickerField("province")}>
+                <Text style={styles.selectLabel}>Província</Text>
+                <View style={styles.selectValueRow}>
+                  <Text style={styles.selectValue}>{province}</Text>
+                  <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+                </View>
+              </Pressable>
+              <Pressable style={styles.selectInput} onPress={() => setPickerField("city")}>
+                <Text style={styles.selectLabel}>Cidade</Text>
+                <View style={styles.selectValueRow}>
+                  <Text style={styles.selectValue}>{city}</Text>
+                  <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+                </View>
+              </Pressable>
             </>
           ) : null}
           <TextInput style={[styles.input, styles.notesInput]} placeholder={deliveryZone === "pickup" ? "Notas para o levantamento (opcional)" : "Referências ou notas de entrega"} placeholderTextColor={colors.textMuted} multiline value={deliveryNotes} onChangeText={setDeliveryNotes} />
@@ -180,6 +232,27 @@ export default function MerchDetailScreen() {
 
         <View style={{ height: 50 }} />
       </ScrollView>
+
+      <Modal visible={pickerField !== null} transparent animationType="fade" onRequestClose={() => setPickerField(null)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setPickerField(null)}>
+          <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.modalTitle}>Selecionar {pickerField === "province" ? "província" : "cidade"}</Text>
+            <ScrollView style={styles.modalList}>
+              {availableDestinations.map((destination) => {
+                const value = pickerField === "province" ? destination.province : destination.city;
+                const selected = destination.province === province && destination.city === city;
+
+                return (
+                  <Pressable key={`${destination.province}-${destination.city}`} style={[styles.modalOption, selected && styles.modalOptionActive]} onPress={() => selectDestination(destination)}>
+                    <Text style={[styles.modalOptionText, selected && styles.modalOptionTextActive]}>{value}</Text>
+                    <Text style={styles.modalOptionHint}>{pickerField === "province" ? destination.city : destination.province}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </AppGradient>
   );
 }
@@ -262,10 +335,23 @@ const styles = StyleSheet.create({
   orderTitle: { color: colors.white, fontSize: 20, fontWeight: "800", marginBottom: 8 },
   deliveryInfo: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginBottom: 14 },
   input: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(255,255,255,0.06)", color: colors.white, paddingHorizontal: 14, marginBottom: 10 },
+  selectInput: { minHeight: 58, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(255,255,255,0.06)", paddingHorizontal: 14, paddingVertical: 9, marginBottom: 10 },
+  selectLabel: { color: colors.textMuted, fontSize: 11, marginBottom: 4 },
+  selectValueRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  selectValue: { color: colors.white, fontSize: 15, fontWeight: "700" },
   notesInput: { minHeight: 84, paddingTop: 12, textAlignVertical: "top" },
   zoneRow: { gap: 8, marginBottom: 12 },
   zoneOption: { borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", padding: 12 },
   zoneOptionActive: { borderColor: colors.yellow, backgroundColor: "rgba(255,214,0,0.12)" },
   zoneText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
   zoneTextActive: { color: colors.yellow },
+  modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.68)" },
+  modalCard: { maxHeight: "72%", borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: "#17122b", padding: 20, paddingBottom: 34 },
+  modalTitle: { color: colors.white, fontSize: 19, fontWeight: "800", marginBottom: 14 },
+  modalList: { flexGrow: 0 },
+  modalOption: { paddingVertical: 13, paddingHorizontal: 14, borderRadius: 12, marginBottom: 7, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  modalOptionActive: { borderColor: colors.yellow, backgroundColor: "rgba(255,214,0,0.10)" },
+  modalOptionText: { color: colors.white, fontSize: 15, fontWeight: "700" },
+  modalOptionTextActive: { color: colors.yellow },
+  modalOptionHint: { color: colors.textMuted, fontSize: 12, marginTop: 3 },
 });
