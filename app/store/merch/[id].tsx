@@ -126,7 +126,12 @@ export default function MerchDetailScreen() {
         );
       }
     } catch (error: any) {
-      Alert.alert("Não foi possível encomendar", error?.response?.data?.message || "Verifica os dados e tenta novamente.");
+      const status = error?.response?.status;
+      const message = status && status < 500
+        ? error?.response?.data?.message
+        : null;
+
+      Alert.alert("Não foi possível encomendar", message || "Verifica os dados e tenta novamente.");
     } finally {
       setSubmitting(false);
     }
