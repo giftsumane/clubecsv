@@ -85,6 +85,9 @@ export default function PurchasesScreen() {
             {item.historyType === "order" && item.items?.[0] ? (
               <Text style={styles.itemTitle}>{item.items[0].quantity} × {item.items[0].title}</Text>
             ) : null}
+            {item.historyType === "order" && item.delivery_zone === "pickup" ? (
+              <Text style={styles.itemTitle}>Levantamento na CSV · Sem delivery</Text>
+            ) : null}
           </View>
         )}
         ListHeaderComponent={

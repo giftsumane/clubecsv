@@ -5,11 +5,11 @@ export type MerchOrderInput = {
   quantity: number;
   customer_name: string;
   phone: string;
-  address: string;
+  address?: string;
   neighborhood?: string;
-  city: string;
-  province: string;
-  delivery_zone: "maputo_center" | "outside_maputo_center";
+  city?: string;
+  province?: string;
+  delivery_zone: "pickup" | "maputo_center" | "outside_maputo_center";
   delivery_notes?: string;
 };
 

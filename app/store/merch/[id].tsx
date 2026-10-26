@@ -32,7 +32,7 @@ export default function MerchDetailScreen() {
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("Maputo");
   const [province, setProvince] = useState("Maputo Cidade");
-  const [deliveryZone, setDeliveryZone] = useState<"maputo_center" | "outside_maputo_center">("maputo_center");
+  const [deliveryZone, setDeliveryZone] = useState<"pickup" | "maputo_center" | "outside_maputo_center">("pickup");
   const [deliveryNotes, setDeliveryNotes] = useState("");
 
   useEffect(() => {
@@ -61,10 +61,10 @@ export default function MerchDetailScreen() {
         quantity: Math.max(1, Number(quantity) || 1),
         customer_name: customerName.trim(),
         phone: phone.trim(),
-        address: address.trim(),
-        neighborhood: neighborhood.trim() || undefined,
-        city: city.trim(),
-        province: province.trim(),
+        address: deliveryZone === "pickup" ? undefined : address.trim(),
+        neighborhood: deliveryZone === "pickup" ? undefined : neighborhood.trim() || undefined,
+        city: deliveryZone === "pickup" ? undefined : city.trim(),
+        province: deliveryZone === "pickup" ? undefined : province.trim(),
         delivery_zone: deliveryZone,
         delivery_notes: deliveryNotes.trim() || undefined,
       });
@@ -149,8 +149,11 @@ export default function MerchDetailScreen() {
 
         <View style={styles.orderCard}>
           <Text style={styles.orderTitle}>Dados da encomenda</Text>
-          <Text style={styles.deliveryInfo}>No centro da Cidade de Maputo, o delivery custa 100 MZN. Fora do centro, o preço é confirmado por WhatsApp.</Text>
+          <Text style={styles.deliveryInfo}>Podes levantar gratuitamente na CSV. No centro da Cidade de Maputo, o delivery custa 100 MZN. Fora do centro, o preço é confirmado por WhatsApp.</Text>
           <View style={styles.zoneRow}>
+            <Pressable style={[styles.zoneOption, deliveryZone === "pickup" && styles.zoneOptionActive]} onPress={() => setDeliveryZone("pickup")}>
+              <Text style={[styles.zoneText, deliveryZone === "pickup" && styles.zoneTextActive]}>Levantar na CSV · Grátis</Text>
+            </Pressable>
             <Pressable style={[styles.zoneOption, deliveryZone === "maputo_center" && styles.zoneOptionActive]} onPress={() => setDeliveryZone("maputo_center")}>
               <Text style={[styles.zoneText, deliveryZone === "maputo_center" && styles.zoneTextActive]}>Centro de Maputo · 100 MZN</Text>
             </Pressable>
@@ -161,11 +164,15 @@ export default function MerchDetailScreen() {
           <TextInput style={styles.input} placeholder="Quantidade" placeholderTextColor={colors.textMuted} keyboardType="number-pad" value={quantity} onChangeText={setQuantity} />
           <TextInput style={styles.input} placeholder="Nome completo" placeholderTextColor={colors.textMuted} value={customerName} onChangeText={setCustomerName} />
           <TextInput style={styles.input} placeholder="WhatsApp" placeholderTextColor={colors.textMuted} keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-          <TextInput style={styles.input} placeholder="Endereço" placeholderTextColor={colors.textMuted} value={address} onChangeText={setAddress} />
-          <TextInput style={styles.input} placeholder="Bairro" placeholderTextColor={colors.textMuted} value={neighborhood} onChangeText={setNeighborhood} />
-          <TextInput style={styles.input} placeholder="Cidade" placeholderTextColor={colors.textMuted} value={city} onChangeText={setCity} />
-          <TextInput style={styles.input} placeholder="Província" placeholderTextColor={colors.textMuted} value={province} onChangeText={setProvince} />
-          <TextInput style={[styles.input, styles.notesInput]} placeholder="Referências ou notas de entrega" placeholderTextColor={colors.textMuted} multiline value={deliveryNotes} onChangeText={setDeliveryNotes} />
+          {deliveryZone !== "pickup" ? (
+            <>
+              <TextInput style={styles.input} placeholder="Endereço" placeholderTextColor={colors.textMuted} value={address} onChangeText={setAddress} />
+              <TextInput style={styles.input} placeholder="Bairro" placeholderTextColor={colors.textMuted} value={neighborhood} onChangeText={setNeighborhood} />
+              <TextInput style={styles.input} placeholder="Cidade" placeholderTextColor={colors.textMuted} value={city} onChangeText={setCity} />
+              <TextInput style={styles.input} placeholder="Província" placeholderTextColor={colors.textMuted} value={province} onChangeText={setProvince} />
+            </>
+          ) : null}
+          <TextInput style={[styles.input, styles.notesInput]} placeholder={deliveryZone === "pickup" ? "Notas para o levantamento (opcional)" : "Referências ou notas de entrega"} placeholderTextColor={colors.textMuted} multiline value={deliveryNotes} onChangeText={setDeliveryNotes} />
           <Pressable style={[styles.button, submitting && styles.disabled]} onPress={submitOrder} disabled={submitting}>
             {submitting ? <ActivityIndicator color="#111" /> : <Text style={styles.buttonText}>Encomendar</Text>}
           </Pressable>
