@@ -32,6 +32,7 @@ export type StoreMerch = {
   image_url?: string | null;
   category?: string | null;
   stock?: number | null;
+  available_sizes?: string[];
   price: number;
   currency?: string | null;
   external_url?: string | null;

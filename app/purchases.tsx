@@ -88,7 +88,10 @@ export default function PurchasesScreen() {
               <Text style={[styles.statusText, { color: status.textColor }]}>{status.label}</Text>
             </View>
             {item.historyType === "order" && item.items?.[0] ? (
-              <Text style={styles.itemTitle}>{item.items[0].quantity} × {item.items[0].title}</Text>
+              <Text style={styles.itemTitle}>
+                {item.items[0].quantity} × {item.items[0].title}
+                {item.items[0].options?.size ? ` · Tamanho ${item.items[0].options.size}` : ""}
+              </Text>
             ) : null}
             {item.historyType === "order" && item.delivery_zone === "pickup" ? (
               <Text style={styles.itemTitle}>Levantamento na CSV · Sem delivery</Text>

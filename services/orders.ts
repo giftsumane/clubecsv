@@ -3,6 +3,7 @@ import { api } from "@/src/api/client";
 export type MerchOrderInput = {
   merch_id: number;
   quantity: number;
+  size: "S" | "M" | "L" | "XL" | "XXL";
   customer_name: string;
   phone: string;
   address?: string;

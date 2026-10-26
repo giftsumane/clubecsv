@@ -35,6 +35,9 @@ const DELIVERY_DESTINATIONS = [
   { province: "Zambézia", city: "Quelimane" },
 ] as const;
 
+const MERCH_SIZES = ["S", "M", "L", "XL", "XXL"] as const;
+type MerchSize = (typeof MERCH_SIZES)[number];
+
 type PickerField = "province" | "city";
 
 export default function MerchDetailScreen() {
@@ -43,6 +46,7 @@ export default function MerchDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [quantity, setQuantity] = useState("1");
+  const [size, setSize] = useState<MerchSize | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -81,6 +85,10 @@ export default function MerchDetailScreen() {
         if (!params.id) return;
         const data = await getStoreMerch(Number(params.id));
         setItem(data);
+        const firstSize = data.available_sizes?.find((value): value is MerchSize =>
+          MERCH_SIZES.includes(value as MerchSize)
+        );
+        setSize(firstSize || null);
       } catch (error) {
         console.log("Erro ao carregar merch:", error);
       } finally {
@@ -94,11 +102,17 @@ export default function MerchDetailScreen() {
   const submitOrder = async () => {
     if (!item || submitting) return;
 
+    if (!size) {
+      Alert.alert("Escolhe o tamanho", "Selecciona um tamanho disponível antes de encomendar.");
+      return;
+    }
+
     try {
       setSubmitting(true);
       const result = await createMerchOrder({
         merch_id: item.id,
         quantity: Math.max(1, Number(quantity) || 1),
+        size,
         customer_name: customerName.trim(),
         phone: phone.trim(),
         address: deliveryZone === "pickup" ? undefined : address.trim(),
@@ -205,6 +219,24 @@ export default function MerchDetailScreen() {
             <Pressable style={[styles.zoneOption, deliveryZone === "outside_maputo_center" && styles.zoneOptionActive]} onPress={() => chooseDeliveryZone("outside_maputo_center")}>
               <Text style={[styles.zoneText, deliveryZone === "outside_maputo_center" && styles.zoneTextActive]}>Fora do centro · Consultar</Text>
             </Pressable>
+          </View>
+          <Text style={styles.fieldLabel}>Tamanho</Text>
+          <View style={styles.sizeRow}>
+            {MERCH_SIZES.map((option) => {
+              const available = item.available_sizes?.includes(option) ?? false;
+              const selected = size === option;
+
+              return (
+                <Pressable
+                  key={option}
+                  style={[styles.sizeOption, selected && styles.sizeOptionActive, !available && styles.sizeOptionDisabled]}
+                  onPress={() => available && setSize(option)}
+                  disabled={!available}
+                >
+                  <Text style={[styles.sizeText, selected && styles.sizeTextActive, !available && styles.sizeTextDisabled]}>{option}</Text>
+                </Pressable>
+              );
+            })}
           </View>
           <TextInput style={styles.input} placeholder="Quantidade" placeholderTextColor={colors.textMuted} keyboardType="number-pad" value={quantity} onChangeText={setQuantity} />
           <TextInput style={styles.input} placeholder="Nome completo" placeholderTextColor={colors.textMuted} value={customerName} onChangeText={setCustomerName} />
@@ -350,6 +382,14 @@ const styles = StyleSheet.create({
   zoneOptionActive: { borderColor: colors.yellow, backgroundColor: "rgba(255,214,0,0.12)" },
   zoneText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
   zoneTextActive: { color: colors.yellow },
+  fieldLabel: { color: colors.white, fontSize: 14, fontWeight: "800", marginBottom: 9 },
+  sizeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
+  sizeOption: { minWidth: 48, height: 44, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  sizeOptionActive: { borderColor: colors.yellow, backgroundColor: "rgba(255,214,0,0.14)" },
+  sizeOptionDisabled: { opacity: 0.3 },
+  sizeText: { color: colors.white, fontSize: 14, fontWeight: "800" },
+  sizeTextActive: { color: colors.yellow },
+  sizeTextDisabled: { textDecorationLine: "line-through" },
   modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.68)" },
   modalCard: { maxHeight: "72%", borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: "#17122b", padding: 20, paddingBottom: 34 },
   modalTitle: { color: colors.white, fontSize: 19, fontWeight: "800", marginBottom: 14 },
