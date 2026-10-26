@@ -8,23 +8,35 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
+        "APP_VARIANT": "staging",
         "EXPO_PUBLIC_API_URL": "https://staging.csveventos.co.mz/api"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
+        "APP_VARIANT": "staging",
+        "EXPO_PUBLIC_API_URL": "https://staging.csveventos.co.mz/api"
+      }
+    },
+    "testflight": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "staging",
         "EXPO_PUBLIC_API_URL": "https://staging.csveventos.co.mz/api"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
+        "APP_VARIANT": "production",
         "EXPO_PUBLIC_API_URL": "https://bilhetes.csveventos.co.mz/api"
       }
     }
   },
   "submit": {
+    "testflight": {},
     "production": {}
   }
 }
