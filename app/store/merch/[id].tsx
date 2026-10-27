@@ -125,7 +125,10 @@ export default function MerchDetailScreen() {
 
       if (result.checkout_url) {
         await WebBrowser.openBrowserAsync(result.checkout_url);
-        Alert.alert("Encomenda criada", "Consulta o estado da encomenda no histórico de compras.");
+        Alert.alert(
+          "Pagamento iniciado",
+          "A encomenda só será criada e aparecerá no histórico depois da confirmação do pagamento."
+        );
         return;
       }
 
